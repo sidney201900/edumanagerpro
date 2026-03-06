@@ -11,8 +11,9 @@ RUN npm install
 
 # Copia o resto do código
 COPY . .
-ENV VITE_SUPABASE_URL=https://ekbuvcjsfcczviqqlfit.supabase.co
-ENV VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrYnV2Y2pzZmNjenZpcXFsZml0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5OTU0MzIsImV4cCI6MjA4NjU3MTQzMn0.oIzBeGF-PjaviZejYb1TeOOEzMm-Jjth1XzvJrjD6us
+RUN echo "VITE_SUPABASE_URL=https://ekbuvcjsfcczviqqlfit.supabase.co" > .env
+RUN echo "VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrYnV2Y2pzZmNjenZpcXFsZml0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5OTU0MzIsImV4cCI6MjA4NjU3MTQzMn0.oIzBeGF-PjaviZejYb1TeOOEzMm-Jjth1XzvJrjD6us" >> .env
+RUN npm run build
 # Gera o build do Vite (pasta dist)
 RUN npm run build
 
