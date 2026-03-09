@@ -18,7 +18,7 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// API Endpoints
+// Webhook Asaas
 app.post('/api/webhook_asaas', async (req, res) => {
   const tokenRecebido = req.headers['asaas-access-token'];
   if (tokenRecebido !== process.env.ASAAS_WEBHOOK_TOKEN) {
@@ -69,15 +69,16 @@ app.post('/api/webhook_asaas', async (req, res) => {
   }
 });
 
+// Gerar Cobrança
 app.post('/api/gerar_cobranca', async (req, res) => {
   try {
     const { 
       aluno_id, nome, cpf, email, valor, vencimento, multa, juros, desconto,
-      telefone, cep, endereco, numero, bairro, descricao
+      telefone, cep, endereco, numero, bairro, descricao, parcelas
     } = req.body;
 
     // 1. Create Asaas Customer
-    const asaasCustomerRes = await fetch('https://sandbox.asaas.com/api/v3/customers', {
+    const customerRes = await fetch('https://sandbox.asaas.com/api/v3/customers', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -95,23 +96,29 @@ app.post('/api/gerar_cobranca', async (req, res) => {
       })
     });
 
-    if (!asaasCustomerRes.ok) {
-      const errorData = await asaasCustomerRes.json();
+    if (!customerRes.ok) {
+      const errorData = await customerRes.json();
       console.error('Asaas Customer Error:', errorData);
       throw new Error('Falha ao criar cliente no Asaas');
     }
 
-    const customerData = await asaasCustomerRes.json();
+    const customerData = await customerRes.json();
     const customerId = customerData.id;
 
-    // 2. Create Asaas Payment (Boleto)
+    // 2. Create Asaas Payment
     const asaasPayload = {
       customer: customerId,
       billingType: 'BOLETO',
       dueDate: vencimento,
-      value: valor,
       description: descricao ? `${descricao} - Microtec Informática Cursos` : 'Mensalidade - Microtec Informática Cursos'
     };
+
+    if (parcelas && parcelas > 1) {
+      asaasPayload.installmentCount = parcelas;
+      asaasPayload.installmentValue = valor;
+    } else {
+      asaasPayload.value = valor;
+    }
 
     if (multa > 0) asaasPayload.fine = { value: multa, type: 'PERCENTAGE' };
     if (juros > 0) asaasPayload.interest = { value: juros, type: 'PERCENTAGE' };
@@ -134,16 +141,19 @@ app.post('/api/gerar_cobranca', async (req, res) => {
 
     const paymentData = await paymentRes.json();
 
-    // 3. Save to Supabase
+    // 3. Save to Supabase (Initial charge or first installment)
+    const paymentId = paymentData.id || (paymentData.installments && paymentData.installments[0].id);
+    const bankSlipUrl = paymentData.bankSlipUrl || (paymentData.installments && paymentData.installments[0].bankSlipUrl);
+
     const { error: dbError } = await supabase
       .from('alunos_cobrancas')
       .insert([{
         aluno_id: aluno_id,
         asaas_customer_id: customerId,
-        asaas_payment_id: paymentData.id,
+        asaas_payment_id: paymentId,
         valor: valor,
         vencimento: vencimento,
-        link_boleto: paymentData.bankSlipUrl
+        link_boleto: bankSlipUrl
       }]);
 
     if (dbError) {
@@ -152,8 +162,8 @@ app.post('/api/gerar_cobranca', async (req, res) => {
     }
 
     return res.status(200).json({ 
-      bankSlipUrl: paymentData.bankSlipUrl,
-      paymentId: paymentData.id
+      bankSlipUrl: bankSlipUrl,
+      paymentId: paymentId
     });
 
   } catch (error) {
@@ -162,11 +172,11 @@ app.post('/api/gerar_cobranca', async (req, res) => {
   }
 });
 
+// Excluir Cobrança
 app.post('/api/excluir_cobranca', async (req, res) => {
   try {
     const { aluno_id, valor, vencimento } = req.body;
 
-    // Busca o asaas_payment_id correspondente
     const { data, error: selectError } = await supabase
       .from('alunos_cobrancas')
       .select('asaas_payment_id')
@@ -182,7 +192,6 @@ app.post('/api/excluir_cobranca', async (req, res) => {
 
     const asaasPaymentId = data.asaas_payment_id;
 
-    // Deleta no Asaas
     const asaasResponse = await fetch(`https://sandbox.asaas.com/api/v3/payments/${asaasPaymentId}`, {
       method: 'DELETE',
       headers: {
@@ -195,7 +204,6 @@ app.post('/api/excluir_cobranca', async (req, res) => {
       console.error('Erro ao deletar no Asaas:', errorText);
     }
 
-    // Deleta no Supabase
     const { error: deleteError } = await supabase
       .from('alunos_cobrancas')
       .delete()
@@ -216,6 +224,8 @@ app.post('/api/excluir_cobranca', async (req, res) => {
 
 // Servir o Frontend
 app.use(express.static(path.join(__dirname, 'dist')));
+
+// Fallback do React Router com Regex nativa
 app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

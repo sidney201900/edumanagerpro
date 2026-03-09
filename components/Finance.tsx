@@ -282,7 +282,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         // Garantir que a data esteja em formato ISO YYYY-MM-DD (string pura)
         const isoDueDate = payment.dueDate;
         
-        return fetch('/.netlify/functions/gerar_cobranca', {
+        return fetch('/api/gerar_cobranca', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -301,7 +301,8 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
             numero: student.addressNumber,
             bairro: student.addressNeighborhood,
             nascimento: student.birthDate,
-            descricao: payment.description
+            descricao: payment.description,
+            parcelas: 1
           })
         });
       });
@@ -413,7 +414,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         // Garantir que a data esteja em formato ISO YYYY-MM-DD (string pura)
         const isoDueDate = payment.dueDate;
 
-        return fetch('/.netlify/functions/gerar_cobranca', {
+        return fetch('/api/gerar_cobranca', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -432,7 +433,8 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
             numero: student.addressNumber,
             bairro: student.addressNeighborhood,
             nascimento: student.birthDate,
-            descricao: payment.description
+            descricao: payment.description,
+            parcelas: 1
           })
         });
       });
@@ -519,7 +521,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
     if (deleteType === 'single') {
       try {
-        const response = await fetch('/.netlify/functions/excluir_cobranca', {
+        const response = await fetch('/api/excluir_cobranca', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

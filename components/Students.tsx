@@ -572,7 +572,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
           dueDate.setDate(dueDate.getDate() + 5);
           const formattedDueDate = dueDate.toISOString().split('T')[0];
 
-          const response = await fetch('/.netlify/functions/gerar_cobranca', {
+          const response = await fetch('/api/gerar_cobranca', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -585,7 +585,8 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
               valor: feeAmount,
               vencimento: formattedDueDate,
               multa: 0,
-              juros: 0
+              juros: 0,
+              parcelas: 1
             })
           });
 
