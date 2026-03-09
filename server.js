@@ -124,9 +124,13 @@ app.post('/api/gerar_cobranca', async (req, res) => {
       asaasPayload.value = valor;
     }
 
-    if (multa > 0) asaasPayload.fine = { value: multa, type: 'PERCENTAGE' };
-    if (juros > 0) asaasPayload.interest = { value: juros, type: 'PERCENTAGE' };
-    if (desconto > 0) asaasPayload.discount = { value: desconto, dueDateLimitDays: 0, type: 'FIXED' };
+    const fineValue = parseFloat(multa);
+    const interestValue = parseFloat(juros);
+    const discountValue = parseFloat(desconto);
+
+    if (!isNaN(fineValue) && fineValue > 0) asaasPayload.fine = { value: fineValue, type: 'PERCENTAGE' };
+    if (!isNaN(interestValue) && interestValue > 0) asaasPayload.interest = { value: interestValue, type: 'PERCENTAGE' };
+    if (!isNaN(discountValue) && discountValue > 0) asaasPayload.discount = { value: discountValue, dueDateLimitDays: 0, type: 'FIXED' };
 
     const paymentRes = await fetch('https://sandbox.asaas.com/api/v3/payments', {
       method: 'POST',
@@ -203,11 +207,18 @@ app.post('/api/excluir_cobranca', async (req, res) => {
       }
     });
 
-    if (!asaasResponse.ok && asaasResponse.status !== 404) {
-      const errorText = await asaasResponse.text();
-      console.error('Erro ao deletar no Asaas:', errorText);
+    let asaasDeleted = false;
+    let asaasErrorMessage = '';
+
+    if (asaasResponse.ok || asaasResponse.status === 404) {
+      asaasDeleted = true;
+    } else {
+      const errorData = await asaasResponse.json().catch(() => ({}));
+      asaasErrorMessage = errorData.errors?.[0]?.description || 'Erro desconhecido no Asaas';
+      console.error('Erro ao deletar no Asaas:', asaasErrorMessage);
     }
 
+    // Deletar do Supabase independente do sucesso no Asaas (conforme solicitado: permitir excluir se necessário)
     const { error: deleteError } = await supabase
       .from('alunos_cobrancas')
       .delete()
@@ -218,7 +229,14 @@ app.post('/api/excluir_cobranca', async (req, res) => {
       return res.status(500).json({ error: 'Erro ao deletar no banco de dados' });
     }
 
-    return res.status(200).json({ message: 'Sucesso ao excluir cobrança' });
+    if (!asaasDeleted) {
+      return res.status(200).json({ 
+        message: 'Excluído apenas no sistema local.',
+        asaasError: asaasErrorMessage 
+      });
+    }
+
+    return res.status(200).json({ message: 'Cobrança cancelada com sucesso no Asaas e no sistema' });
 
   } catch (error) {
     console.error('Erro na função excluir_cobranca:', error);

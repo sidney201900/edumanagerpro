@@ -76,7 +76,24 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
         if (updatedCount > 0) {
           updateData({ payments: updatedPayments });
-          showAlert('Sincronização', `${updatedCount} pagamento(s) atualizado(s) via Asaas!`, 'success');
+          
+          // Check if any was updated to overdue
+          const hasOverdue = updatedPayments.some((p, idx) => {
+            const oldP = data.payments[idx];
+            return oldP && oldP.status !== 'overdue' && p.status === 'overdue';
+          });
+          
+          const hasPaid = updatedPayments.some((p, idx) => {
+            const oldP = data.payments[idx];
+            return oldP && oldP.status !== 'paid' && p.status === 'paid';
+          });
+
+          let message = `${updatedCount} pagamento(s) atualizado(s).`;
+          if (hasPaid && !hasOverdue) message = 'Pagamento confirmado e registrado.';
+          if (hasOverdue && !hasPaid) message = 'Status atualizado para Atrasado.';
+          if (hasPaid && hasOverdue) message = 'Pagamentos e atrasos atualizados.';
+
+          showAlert('Sincronização', message, 'success');
         } else {
           showAlert('Sincronização', 'Nenhum novo pagamento confirmado encontrado.', 'info');
         }
@@ -362,6 +379,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       payments: [...data.payments, ...newPayments],
       ...(selectedItemType === 'handout' ? { handoutDeliveries: newDeliveries } : {})
     });
+    showAlert('Sucesso', 'Nova cobrança gerada com sucesso.', 'success');
     closeModal();
   };
 
@@ -465,6 +483,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
 
     updateData({ payments: [...data.payments, ...newPayments] });
+    showAlert('Sucesso', 'Nova cobrança gerada com sucesso.', 'success');
     closeModal();
   };
 
@@ -511,6 +530,9 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     const updated = data.payments.map(p => {
       if (p.id === payment.id) {
         const isPaid = p.status === 'paid';
+        if (!isPaid) {
+          showAlert('Sucesso', 'Pagamento confirmado e registrado.', 'success');
+        }
         return {
           ...p,
           status: isPaid ? 'pending' : 'paid',
@@ -539,12 +561,20 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
           })
         });
 
-        if (!response.ok) {
-          showAlert('Erro', 'Aviso: Boleto excluído apenas localmente. Não foi possível apagar no Asaas.', 'error');
+        const result = await response.json();
+
+        if (response.ok) {
+          if (result.asaasError) {
+            showAlert('Aviso', `Cobrança removida do sistema, mas o Asaas retornou: ${result.asaasError}`, 'warning');
+          } else {
+            showAlert('Sucesso', 'Cobrança cancelada com sucesso no Asaas e no sistema.', 'success');
+          }
+        } else {
+          showAlert('Erro', 'Erro ao processar exclusão no servidor.', 'error');
         }
       } catch (error) {
         console.error('Erro ao excluir no Asaas:', error);
-        showAlert('Erro', 'Aviso: Boleto excluído apenas localmente. Não foi possível apagar no Asaas.', 'error');
+        showAlert('Erro', 'Falha na comunicação com o servidor ao excluir.', 'error');
       }
 
       updatedPayments = updatedPayments.filter(p => p.id !== paymentToDelete.id);

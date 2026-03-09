@@ -659,6 +659,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
     updateData(newData);
     dbService.saveData({ ...data, ...newData });
+    showAlert('Sucesso', (formData as any).generateFee ? 'Aluno salvo e nova cobrança gerada com sucesso.' : 'Aluno salvo com sucesso.', 'success');
     setShowModal(false);
     setEditingStudent(null);
     setFormData({ 
