@@ -1,20 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Access environment variables using import.meta.env for Vite/modern bundlers
-// or process.env if using a different setup. Given the context, we handle potential missing keys safely.
-
-const getEnv = (key: string) => {
-  if (import.meta.env && import.meta.env[key]) {
-    return import.meta.env[key];
-  }
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key];
-  }
-  return '';
-};
-
-const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
-const supabaseKey = getEnv('VITE_SUPABASE_KEY') || getEnv('SUPABASE_KEY');
+// Valores fixos inseridos diretamente para contornar a cegueira do Vite no build
+const supabaseUrl = 'https://ekbuvcjsfcczviqqlfit.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrYnV2Y2pzZmNjenZpcXFsZml0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5OTU0MzIsImV4cCI6MjA4NjU3MTQzMn0.oIzBeGF-PjaviZejYb1TeOOEzMm-Jjth1XzvJrjD6us';
 
 export const isSupabaseConfigured = () => {
   const configured = !!supabaseUrl && !!supabaseKey;
@@ -24,9 +12,7 @@ export const isSupabaseConfigured = () => {
   return configured;
 };
 
-// Prevent "supabaseUrl is required" error during initialization if env vars are missing.
-// The app checks isSupabaseConfigured() before using this client.
-// We provide a fallback valid URL to satisfy the constructor when config is missing.
+// Cria a ligação definitiva
 export const supabase = isSupabaseConfigured()
   ? createClient(supabaseUrl, supabaseKey)
   : createClient('https://placeholder.supabase.co', 'placeholder');
