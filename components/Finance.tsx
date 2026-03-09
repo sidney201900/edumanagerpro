@@ -29,38 +29,46 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  React.useEffect(() => {
+    syncAsaasPayments();
+  }, []);
+
   const syncAsaasPayments = async () => {
     if (!isSupabaseConfigured() || isSyncing) return;
     
-    const pendingPayments = data.payments.filter(p => p.status === 'pending');
-    if (pendingPayments.length === 0) return;
-
     setIsSyncing(true);
     try {
       const { data: cloudPayments, error } = await supabase
         .from('alunos_cobrancas')
-        .select('asaas_payment_id, status, aluno_id, valor, vencimento')
-        .eq('status', 'PAGO');
+        .select('asaas_payment_id, status, aluno_id, valor, vencimento, data_pagamento');
 
       if (error) throw error;
 
       if (cloudPayments && cloudPayments.length > 0) {
         let updatedCount = 0;
         const updatedPayments = data.payments.map(p => {
-          if (p.status === 'pending') {
-            // Match by asaasPaymentId if available, otherwise by student, amount and due date
-            const match = cloudPayments.find(cp => {
-              if (p.asaasPaymentId) {
-                return cp.asaas_payment_id === p.asaasPaymentId;
-              }
-              return cp.aluno_id === p.studentId && 
-                     Math.abs(cp.valor - p.amount) < 0.01 && 
-                     cp.vencimento === p.dueDate;
-            });
+          const match = cloudPayments.find(cp => {
+            if (p.asaasPaymentId) {
+              return cp.asaas_payment_id === p.asaasPaymentId;
+            }
+            return cp.aluno_id === p.studentId && 
+                   Math.abs(cp.valor - p.amount) < 0.01 && 
+                   cp.vencimento === p.dueDate;
+          });
+          
+          if (match) {
+            const newStatus = match.status.toLowerCase() === 'pago' ? 'paid' : 
+                             match.status.toLowerCase() === 'atrasado' ? 'overdue' : 
+                             match.status.toLowerCase() === 'cancelado' ? 'cancelled' : 'pending';
             
-            if (match) {
+            if (p.status !== newStatus || p.amount !== match.valor) {
               updatedCount++;
-              return { ...p, status: 'paid' as const, paidDate: new Date().toISOString() };
+              return { 
+                ...p, 
+                status: newStatus as any, 
+                amount: match.valor,
+                paidDate: match.data_pagamento || p.paidDate 
+              };
             }
           }
           return p;
@@ -68,7 +76,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
         if (updatedCount > 0) {
           updateData({ payments: updatedPayments });
-          showAlert('Sincronização', `${updatedCount} pagamento(s) confirmado(s) via Asaas!`, 'success');
+          showAlert('Sincronização', `${updatedCount} pagamento(s) atualizado(s) via Asaas!`, 'success');
         } else {
           showAlert('Sincronização', 'Nenhum novo pagamento confirmado encontrado.', 'info');
         }
@@ -576,13 +584,40 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch(status) {
-      case 'paid': return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago</span>;
-      case 'pending': return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Clock size={12}/> Pendente</span>;
-      case 'overdue': return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><AlertCircle size={12}/> Atrasado</span>;
-      default: return null;
+  const getStatusBadge = (payment: Payment) => {
+    const status = (payment.status || '').toLowerCase();
+    
+    if (status === 'paid' || status === 'pago') {
+      const dueDate = new Date(payment.dueDate);
+      const paidDate = payment.paidDate ? new Date(payment.paidDate) : null;
+      
+      if (paidDate) {
+        // Reset hours for comparison
+        dueDate.setHours(0,0,0,0);
+        paidDate.setHours(0,0,0,0);
+        
+        if (paidDate <= dueDate) {
+          return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pagamento em Dia</span>;
+        } else {
+          return <span className="inline-flex items-center gap-1 text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago com Atraso</span>;
+        }
+      }
+      return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago</span>;
     }
+    
+    if (status === 'overdue' || status === 'atrasado') {
+      return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><AlertCircle size={12}/> Atrasado</span>;
+    }
+    
+    if (status === 'pending' || status === 'pendente' || !status) {
+      return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Clock size={12}/> Pendente</span>;
+    }
+    
+    if (status === 'cancelled' || status === 'cancelado') {
+      return <span className="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><X size={12}/> Cancelado</span>;
+    }
+    
+    return null;
   };
 
   const inputClass = "px-4 py-2 bg-white text-black border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm text-xs";
@@ -705,7 +740,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                         <div className="text-[10px] text-emerald-600 font-bold">- Desc: R$ {payment.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                       )}
                     </td>
-                    <td className="px-6 py-5">{getStatusBadge(payment.status)}</td>
+                    <td className="px-6 py-5">{getStatusBadge(payment)}</td>
                     <td className="px-6 py-5 text-right flex justify-end gap-2">
                       <button onClick={() => handleDownloadReceipt(payment)} className="p-2 text-slate-400 hover:text-indigo-600 transition-all" title="Recibo"><Printer size={18} /></button>
                       <button onClick={() => togglePaymentStatus(payment)} className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${payment.status === 'paid' ? 'text-slate-400 border-slate-200' : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}>{payment.status === 'paid' ? 'Estornar' : 'Baixar'}</button>

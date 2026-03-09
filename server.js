@@ -34,7 +34,11 @@ app.post('/api/webhook_asaas', async (req, res) => {
     switch (payload.event) {
       case 'PAYMENT_RECEIVED':
       case 'PAYMENT_CONFIRMED':
-        updateData = { status: 'PAGO' };
+        updateData = { 
+          status: 'PAGO', 
+          valor: payload.payment.value,
+          data_pagamento: payload.payment.confirmedDate || payload.payment.paymentDate || new Date().toISOString().split('T')[0]
+        };
         break;
       case 'PAYMENT_OVERDUE':
         updateData = { status: 'ATRASADO', valor: payload.payment.value };
