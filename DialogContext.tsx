@@ -39,7 +39,7 @@ export const DialogProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setIsOpen(false);
       setOptions(null);
       setIsClosing(false);
-    }, 300);
+    }, 400);
   };
 
   const showAlert = (title: string, message: string, type: DialogType = 'info') => {
@@ -87,8 +87,9 @@ export const DialogProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     <DialogContext.Provider value={{ showAlert, showConfirm }}>
       {children}
       {isOpen && options && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-in zoom-in-95'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl transition-all duration-400 ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="h-2 bg-indigo-600 w-full"></div>
             <div className="p-6 text-center">
               <div className={`w-12 h-12 ${getIconBg(options.type)} rounded-full flex items-center justify-center mx-auto mb-4`}>
                 {getIcon(options.type)}

@@ -160,21 +160,29 @@ const App = () => {
     <div className="flex min-h-screen bg-slate-50 relative">
       <Sidebar currentView={currentView} setView={setCurrentView} />
       <main className="flex-1 w-full overflow-y-auto max-h-screen pt-16 md:pt-0 relative">
-        {/* Sync Indicator */}
-        {isCloudEnabled && (
-          <div className={`absolute top-4 right-4 md:right-8 z-10 flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur rounded-full border text-xs font-bold shadow-sm transition-all ${syncStatus === 'conflict' ? 'border-amber-300 text-amber-700 bg-amber-50/80 pointer-events-auto' : 'border-slate-200 text-slate-500 pointer-events-none'}`}>
-            {syncStatus === 'syncing' && <><RefreshCw size={12} className="animate-spin text-indigo-500"/> Sincronizando...</>}
-            {syncStatus === 'saved' && <><Cloud size={12} className="text-emerald-500"/> Salvo na Nuvem</>}
-            {syncStatus === 'error' && <><CloudOff size={12} className="text-red-500"/> Erro ao Salvar</>}
-            {syncStatus === 'conflict' && (
-              <button 
-                onClick={forceSyncFromCloud}
-                className="flex items-center gap-2 hover:text-amber-900 transition-colors"
-              >
-                <AlertCircle size={12} className="text-amber-500"/> 
-                Dados Novos na Nuvem (Clique para Atualizar)
-              </button>
-            )}
+        {/* Sync Indicator - Green Strip on the Right */}
+        {syncStatus === 'syncing' && (
+          <div className="fixed top-6 right-0 z-[100] flex flex-col items-end pointer-events-none animate-in slide-in-from-right duration-500">
+            <div className="bg-emerald-500 text-white py-2.5 px-6 shadow-2xl flex items-center gap-3 border-l-4 border-emerald-300">
+              <RefreshCw size={16} className="animate-spin" />
+              <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando</span>
+            </div>
+            <div className="w-full h-1 bg-emerald-600/20 relative overflow-hidden">
+              <div className="absolute inset-0 bg-white/60 animate-pulse"></div>
+            </div>
+          </div>
+        )}
+
+        {/* Conflict Alert - Only show when there is a version mismatch */}
+        {syncStatus === 'conflict' && (
+          <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-bottom duration-500">
+            <button 
+              onClick={forceSyncFromCloud}
+              className="flex items-center gap-3 px-6 py-3 bg-amber-500 text-white rounded-2xl font-black text-xs shadow-2xl hover:bg-amber-600 transition-all active:scale-95 border-2 border-white"
+            >
+              <AlertCircle size={18} /> 
+              <span>DADOS NOVOS NA NUVEM - CLIQUE PARA ATUALIZAR</span>
+            </button>
           </div>
         )}
 

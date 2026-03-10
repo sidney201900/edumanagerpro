@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { SchoolData, Attendance, Class, Student } from '../types';
 import { dbService } from '../services/dbService';
 import { useDialog } from '../DialogContext';
-import { Search, Calendar, User, Clock, CheckCircle, XCircle, FileDown, BookOpen, Plus, X, AlertCircle } from 'lucide-react';
+import { Search, Calendar, User, Clock, CheckCircle, XCircle, FileDown, BookOpen, Plus, X, AlertCircle, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { addHeader } from '../services/pdfService';
@@ -17,11 +17,24 @@ const AttendanceQuery: React.FC<AttendanceQueryProps> = ({ data, updateData }) =
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [showAbsenceModal, setShowAbsenceModal] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   
   // Absence Form State
   const [absenceStudentId, setAbsenceStudentId] = useState('');
   const [absenceJustification, setAbsenceJustification] = useState('');
+
+  const closeModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setShowAttendanceModal(false);
+      setShowAbsenceModal(false);
+      setIsClosing(false);
+      setAbsenceStudentId('');
+      setAbsenceJustification('');
+    }, 400);
+  };
 
   const handleAddAbsence = () => {
     if (!absenceStudentId || !absenceJustification) {
@@ -48,44 +61,51 @@ const AttendanceQuery: React.FC<AttendanceQueryProps> = ({ data, updateData }) =
 
     setAbsenceStudentId('');
     setAbsenceJustification('');
-    setShowAbsenceModal(false);
+    closeModal();
     showAlert('Sucesso', "Falta justificada registrada com sucesso!", 'success');
   };
 
-  const handleExportPDF = (classObj: Class) => {
-    const doc = new jsPDF();
-    const startY = addHeader(doc, data);
-    
-    doc.setFontSize(18);
-    doc.text('Relatório de Frequência', 14, startY + 10);
-    
-    doc.setFontSize(11);
-    doc.text(`Data: ${new Date(selectedDate).toLocaleDateString()}`, 14, startY + 18);
-    doc.text(`Turma: ${classObj.name}`, 14, startY + 24);
-
-    const classAttendance = (data.attendance || []).filter(record => 
-      record.classId === classObj.id && record.date.startsWith(selectedDate)
-    );
-
-    const tableData = classAttendance.map(record => {
-      const student = data.students.find(s => s.id === record.studentId);
-      const time = new Date(record.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const handleExportPDF = async (classObj: Class) => {
+    setIsGeneratingPDF(true);
+    try {
+      const doc = new jsPDF();
+      const startY = await addHeader(doc, data);
       
-      return [
-        student?.name || 'Desconhecido',
-        time,
-        record.type === 'absence' ? 'Falta Justificada' : 'Presente',
-        record.justification || '-'
-      ];
-    });
+      doc.setFontSize(18);
+      doc.text('Relatório de Frequência', 14, startY + 10);
+      
+      doc.setFontSize(11);
+      doc.text(`Data: ${new Date(selectedDate).toLocaleDateString()}`, 14, startY + 18);
+      doc.text(`Turma: ${classObj.name}`, 14, startY + 24);
 
-    (doc as any).autoTable({
-      startY: startY + 30,
-      head: [['Aluno', 'Horário', 'Status', 'Justificativa']],
-      body: tableData,
-    });
+      const classAttendance = (data.attendance || []).filter(record => 
+        record.classId === classObj.id && record.date.startsWith(selectedDate)
+      );
 
-    doc.save(`frequencia_${classObj.name}_${selectedDate}.pdf`);
+      const tableData = classAttendance.map(record => {
+        const student = data.students.find(s => s.id === record.studentId);
+        const time = new Date(record.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        return [
+          student?.name || 'Desconhecido',
+          time,
+          record.type === 'absence' ? 'Falta Justificada' : 'Presente',
+          record.justification || '-'
+        ];
+      });
+
+      (doc as any).autoTable({
+        startY: startY + 30,
+        head: [['Aluno', 'Horário', 'Status', 'Justificativa']],
+        body: tableData,
+      });
+
+      doc.save(`frequencia_${classObj.name}_${selectedDate}.pdf`);
+    } catch (error) {
+      console.error('Error exporting PDF:', error);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   return (
@@ -152,8 +172,11 @@ const AttendanceQuery: React.FC<AttendanceQueryProps> = ({ data, updateData }) =
 
       {/* Attendance List Modal */}
       {showAttendanceModal && selectedClass && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-2xl animate-in zoom-in duration-200 flex flex-col">
+        <div className={`fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-2xl transition-all duration-400 relative flex flex-col ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <div>
                 <h3 className="text-xl font-black text-slate-800">Frequência: {selectedClass.name}</h3>
@@ -162,13 +185,18 @@ const AttendanceQuery: React.FC<AttendanceQueryProps> = ({ data, updateData }) =
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => handleExportPDF(selectedClass)}
-                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  disabled={isGeneratingPDF}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
                   title="Exportar PDF"
                 >
-                  <FileDown size={20} />
+                  {isGeneratingPDF ? (
+                    <RefreshCw size={20} className="animate-spin" />
+                  ) : (
+                    <FileDown size={20} />
+                  )}
                 </button>
                 <button 
-                  onClick={() => setShowAttendanceModal(false)}
+                  onClick={closeModal}
                   className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                 >
                   <X size={20} />
@@ -231,14 +259,17 @@ const AttendanceQuery: React.FC<AttendanceQueryProps> = ({ data, updateData }) =
 
       {/* Justified Absence Modal */}
       {showAbsenceModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in duration-200">
+        <div className={`fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl transition-all duration-400 relative ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-amber-50/50">
               <h3 className="text-xl font-black text-amber-800 flex items-center gap-2">
                 <AlertCircle size={24} /> Justificar Falta
               </h3>
               <button 
-                onClick={() => setShowAbsenceModal(false)}
+                onClick={closeModal}
                 className="p-2 text-amber-400 hover:text-amber-600 hover:bg-amber-100 rounded-lg transition-colors"
               >
                 <X size={20} />

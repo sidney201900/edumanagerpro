@@ -62,7 +62,7 @@ const Courses: React.FC<CoursesProps> = ({ data, updateData }) => {
       setIsClosing(false);
       setEditingCourse(null);
       setFormData({ name: '', duration: '', durationMonths: 12, registrationFee: 0, monthlyFee: 0, description: '', finePercentage: 0, interestPercentage: 0 });
-    }, 300);
+    }, 400);
   };
 
   const handleEdit = (course: Course) => {
@@ -145,8 +145,11 @@ const Courses: React.FC<CoursesProps> = ({ data, updateData }) => {
       </div>
 
       {isModalOpen && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-2xl shadow-2xl my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-2xl shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
               <div><h3 className="text-2xl font-black text-slate-800 tracking-tight">{editingCourse ? 'Editar Curso' : 'Novo Curso'}</h3><p className="text-sm text-slate-500">Defina os detalhes e valores do curso.</p></div>
               <button onClick={closeModal} className="p-3 bg-white text-slate-400 hover:text-red-500 rounded-xl shadow-sm transition-all hover:rotate-90"><X size={24} /></button>

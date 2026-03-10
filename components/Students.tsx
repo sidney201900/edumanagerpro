@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SchoolData, Student, Class } from '../types';
 import { dbService } from '../services/dbService';
-import { addHeader } from '../services/pdfService';
+import { addHeader, pdfService } from '../services/pdfService';
 import { useDialog } from '../DialogContext';
+import { compressImage } from '../services/imageService';
 import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 import jsPDF from 'jspdf';
@@ -17,10 +18,13 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   const { showAlert, showConfirm } = useDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [viewingStudentHistory, setViewingStudentHistory] = useState<Student | null>(null);
   const [transferringStudent, setTransferringStudent] = useState<Student | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState<Student | null>(null);
   const [newClassId, setNewClassId] = useState('');
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState<Partial<Student>>({
@@ -286,76 +290,21 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
       }
   };
 
-  const generateEnrollmentPDF = (student?: Student) => {
-    const targetData = student || formData;
-    const doc = new jsPDF();
-    const startY = addHeader(doc, data);
-    
-    // Header
-    doc.setFontSize(18);
-    doc.text('Ficha de Matrícula', 105, startY + 10, { align: 'center' });
-    
-    doc.setFontSize(12);
-    doc.text(`Data: ${new Date().toLocaleDateString()}`, 105, startY + 18, { align: 'center' });
-
-    // Photo
-    if (targetData.photo) {
-        try {
-            doc.addImage(targetData.photo, 'JPEG', 150, startY + 25, 40, 53); // x, y, w, h
-        } catch (e) {
-            console.error("Error adding image to PDF", e);
-        }
+  const generateEnrollmentPDF = async (student?: Student) => {
+    setIsGeneratingPDF(true);
+    try {
+      const targetData = student || formData;
+      if (!targetData.id) {
+        showAlert('Atenção', '⚠️ Salve o aluno antes de gerar a ficha.', 'warning');
+        return;
+      }
+      await pdfService.generateStudentRegistrationPDF(targetData as Student, data);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      showAlert('Erro', 'Ocorreu um erro ao gerar o PDF.', 'error');
+    } finally {
+      setIsGeneratingPDF(false);
     }
-
-    // Student Data
-    doc.setFontSize(14);
-    doc.text('Dados do Aluno', 14, startY + 30);
-    doc.setFontSize(10);
-    doc.text(`Nome: ${targetData.name || '-'}`, 14, startY + 40);
-    doc.text(`CPF: ${targetData.cpf || '-'}`, 14, startY + 46);
-    doc.text(`RG: ${targetData.rg || '-'}`, 14, startY + 52);
-    
-    // Format dates for display
-    const birthDate = targetData.birthDate ? targetData.birthDate.split('-').reverse().join('/') : '-';
-    doc.text(`Data de Nascimento: ${birthDate}`, 14, startY + 58);
-    
-    doc.text(`Email: ${targetData.email || '-'}`, 14, startY + 64);
-    doc.text(`Telefone: ${targetData.phone || '-'}`, 14, startY + 70);
-
-    // Address
-    doc.text('Endereço:', 14, startY + 82);
-    doc.text(`${targetData.addressStreet || ''}, ${targetData.addressNumber || ''} - ${targetData.addressNeighborhood || ''}`, 14, startY + 88);
-    doc.text(`${targetData.addressCity || ''} - ${targetData.addressState || ''} CEP: ${targetData.addressZip || ''}`, 14, startY + 94);
-
-    // Guardian Data
-    if (targetData.hasGuardian) {
-        doc.setFontSize(14);
-        doc.text('Responsável Financeiro', 14, startY + 110);
-        doc.setFontSize(10);
-        doc.text(`Nome: ${targetData.guardianName || '-'}`, 14, startY + 120);
-        doc.text(`CPF: ${targetData.guardianCpf || '-'}`, 14, startY + 126);
-        
-        const guardianBirthDate = targetData.guardianBirthDate ? targetData.guardianBirthDate.split('-').reverse().join('/') : '-';
-        doc.text(`Data de Nascimento: ${guardianBirthDate}`, 14, startY + 132);
-    }
-
-    // Contractual/Financial Placeholder
-    doc.setFontSize(14);
-    doc.text('Termos e Condições', 14, startY + 150);
-    doc.setFontSize(10);
-    const terms = "Declaro que as informações acima são verdadeiras e assumo a responsabilidade pelo pagamento das mensalidades escolares conforme contrato de prestação de serviços educacionais.";
-    const splitTerms = doc.splitTextToSize(terms, 180);
-    doc.text(splitTerms, 14, startY + 160);
-
-    // Signatures
-    const pageHeight = doc.internal.pageSize.height;
-    doc.line(14, pageHeight - 40, 90, pageHeight - 40);
-    doc.text('Assinatura do Responsável', 14, pageHeight - 34);
-
-    doc.line(110, pageHeight - 40, 190, pageHeight - 40);
-    doc.text('Assinatura da Escola', 110, pageHeight - 34);
-
-    doc.save(`ficha_matricula_${targetData.name || 'aluno'}.pdf`);
   };
 
   const checkCEP = async (cepValue?: string) => {
@@ -402,13 +351,12 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result as string;
-        setFormData(prev => ({ ...prev, photo: base64 }));
+      try {
+        const compressed = await compressImage(file);
+        setFormData(prev => ({ ...prev, photo: compressed }));
         
         const img = document.createElement('img');
-        img.src = base64;
+        img.src = compressed;
         img.onload = async () => {
           const descriptor = await processFace(img);
           if (descriptor) {
@@ -417,8 +365,10 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
             showAlert('Atenção', "Nenhum rosto detectado na foto. Por favor, use uma foto clara do rosto.", 'warning');
           }
         };
-      };
-      reader.readAsDataURL(file);
+      } catch (error) {
+        console.error('Erro ao comprimir imagem:', error);
+        showAlert('Erro', 'Falha ao processar imagem.', 'error');
+      }
     }
   };
 
@@ -467,7 +417,8 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0);
-        const base64 = canvas.toDataURL('image/jpeg');
+        // Use WebP for capture too
+        const base64 = canvas.toDataURL('image/webp', 0.8);
         setTempPhoto(base64);
       }
     }
@@ -479,21 +430,27 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
   const savePhoto = async () => {
     if (tempPhoto) {
-      setFormData(prev => ({ ...prev, photo: tempPhoto }));
-      
-      // Process face
-      const img = document.createElement('img');
-      img.src = tempPhoto;
-      img.onload = async () => {
-        const descriptor = await processFace(img);
-        if (descriptor) {
-          setFormData(prev => ({ ...prev, faceDescriptor: descriptor }));
-        } else {
-          showAlert('Atenção', "Nenhum rosto detectado na foto. Por favor, use uma foto clara do rosto.", 'warning');
-        }
-      };
-      
-      stopCamera();
+      try {
+        const compressed = await compressImage(tempPhoto);
+        setFormData(prev => ({ ...prev, photo: compressed }));
+        
+        // Process face
+        const img = document.createElement('img');
+        img.src = compressed;
+        img.onload = async () => {
+          const descriptor = await processFace(img);
+          if (descriptor) {
+            setFormData(prev => ({ ...prev, faceDescriptor: descriptor }));
+          } else {
+            showAlert('Atenção', "Nenhum rosto detectado na foto. Por favor, use uma foto clara do rosto.", 'warning');
+          }
+        };
+        
+        stopCamera();
+      } catch (error) {
+        console.error('Erro ao comprimir foto:', error);
+        showAlert('Erro', 'Falha ao processar foto da câmera.', 'error');
+      }
     }
   };
 
@@ -504,6 +461,68 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     }
     setCameraActive(false);
     setTempPhoto(null);
+  };
+
+  const closeModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setShowModal(false);
+      setIsClosing(false);
+      setEditingStudent(null);
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        birthDate: '',
+        cpf: '',
+        rg: '',
+        rgIssueDate: '',
+        guardianName: '',
+        guardianCpf: '',
+        guardianBirthDate: '',
+        classId: '',
+        status: 'active',
+        registrationDate: new Date().toISOString().split('T')[0],
+        addressZip: '',
+        addressStreet: '',
+        addressNumber: '',
+        addressNeighborhood: '',
+        addressCity: '',
+        addressState: '',
+        discount: 0,
+        hasGuardian: false,
+        generateFee: false,
+        generateContract: false
+      } as any);
+      setBirthDateInput('');
+      setRgIssueDateInput('');
+      setGuardianBirthDateInput('');
+    }, 400);
+  };
+
+  const closeHistoryModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setViewingStudentHistory(null);
+      setIsClosing(false);
+    }, 400);
+  };
+
+  const closeTransferModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setTransferringStudent(null);
+      setIsClosing(false);
+      setNewClassId('');
+    }, 400);
+  };
+
+  const closeDeleteModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setShowDeleteModal(null);
+      setIsClosing(false);
+    }, 400);
   };
 
   const handleSave = async () => {
@@ -660,15 +679,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     updateData(newData);
     dbService.saveData({ ...data, ...newData });
     showAlert('Sucesso', (formData as any).generateFee ? 'Aluno salvo e nova cobrança gerada com sucesso.' : 'Aluno salvo com sucesso.', 'success');
-    setShowModal(false);
-    setEditingStudent(null);
-    setFormData({ 
-      status: 'active', 
-      registrationDate: new Date().toISOString().split('T')[0],
-      hasGuardian: false,
-      generateFee: false,
-      generateContract: false
-    } as any);
+    closeModal();
   };
 
   const handleDelete = (id: string) => {
@@ -706,9 +717,8 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     );
     updateData({ students: updatedStudents });
     dbService.saveData({ ...data, students: updatedStudents });
-    setTransferringStudent(null);
-    setNewClassId('');
     showAlert('Sucesso', 'Aluno transferido com sucesso.', 'success');
+    closeTransferModal();
   };
 
   const openModal = (student?: Student) => {
@@ -752,38 +762,16 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     s.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const generatePDF = () => {
-    const doc = new jsPDF();
-    const startY = addHeader(doc, data);
-    
-    // Header
-    doc.setFontSize(18);
-    doc.text('Relatório de Alunos', 14, startY + 10);
-    doc.setFontSize(10);
-    doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()}`, 14, startY + 18);
-
-    // Table
-    const tableColumn = ["Nome", "Turma", "Status", "Email", "Telefone"];
-    const tableRows = filteredStudents.map(student => {
-      const studentClass = data.classes.find(c => c.id === student.classId);
-      return [
-        student.name,
-        studentClass?.name || '-',
-        student.status === 'active' ? 'Ativo' : 'Inativo',
-        student.email || '-',
-        student.phone || '-'
-      ];
-    });
-
-    autoTable(doc, {
-      head: [tableColumn],
-      body: tableRows,
-      startY: startY + 25,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [79, 70, 229] } // Indigo 600
-    });
-
-    doc.save('lista_alunos.pdf');
+  const generatePDF = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      await pdfService.generateStudentListPDF(data);
+    } catch (error) {
+      console.error('Erro ao gerar PDF:', error);
+      showAlert('Erro', 'Falha ao gerar o relatório de alunos.', 'error');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   return (
@@ -794,8 +782,13 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
           <p className="text-slate-500 font-medium">Gerencie matrículas e dados dos alunos.</p>
         </div>
         <div className="flex gap-2">
-            <button onClick={generatePDF} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors font-bold text-sm flex items-center gap-2">
-            <FileDown size={18} /> Exportar PDF
+            <button 
+              onClick={generatePDF} 
+              disabled={isGeneratingPDF}
+              className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+            >
+              {isGeneratingPDF ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18} />} 
+              {isGeneratingPDF ? 'Gerando...' : 'Exportar PDF'}
             </button>
             <button onClick={() => openModal()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-200">
             <Plus size={18} /> Nova Matrícula
@@ -899,15 +892,18 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
       {/* Enrollment Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl my-auto">
+        <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-2xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             {/* Header */}
             <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div>
                 <h3 className="text-2xl font-black text-slate-800">{editingStudent ? 'Editar Matrícula' : 'Nova Matrícula'}</h3>
                 <p className="text-slate-500 text-sm">Preencha os dados do aluno e responsável.</p>
               </div>
-              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+              <button onClick={closeModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                 <X size={24} className="text-slate-400" />
               </button>
             </div>
@@ -1264,28 +1260,9 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                           <option value="cancelled">Cancelado</option>
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Desconto Matrícula (R$)</label>
-                        <input 
-                          type="number"
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-medium text-sm"
-                          value={formData.discount || 0} 
-                          onChange={e => setFormData({...formData, discount: Number(e.target.value)})} 
-                        />
-                      </div>
                     </div>
 
                     <div className="flex flex-col gap-2 mt-2">
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="checkbox" 
-                          id="generateFee"
-                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                          checked={(formData as any).generateFee || false}
-                          onChange={e => setFormData({...formData, generateFee: e.target.checked} as any)}
-                        />
-                        <label htmlFor="generateFee" className="text-sm font-medium text-slate-600">Gerar Taxa de Matrícula</label>
-                      </div>
                       <div className="flex items-center gap-2">
                         <input 
                           type="checkbox" 
@@ -1306,13 +1283,15 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
             {/* Footer */}
             <div className="px-8 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-4">
               <button 
-                onClick={generateEnrollmentPDF}
-                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 transition-colors flex items-center gap-2 mr-auto"
+                onClick={() => generateEnrollmentPDF()}
+                disabled={isGeneratingPDF}
+                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 transition-colors flex items-center gap-2 mr-auto disabled:opacity-50"
               >
-                <FileText size={18} /> Imprimir Ficha
+                {isGeneratingPDF ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />} 
+                {isGeneratingPDF ? 'Gerando...' : 'Imprimir Ficha'}
               </button>
               <button 
-                onClick={() => setShowModal(false)}
+                onClick={closeModal}
                 className="px-6 py-3 text-slate-500 font-bold hover:text-slate-700 transition-colors"
               >
                 Cancelar
@@ -1329,13 +1308,16 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
       )}
       {/* Transfer Student Modal */}
       {transferringStudent && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl animate-in zoom-in duration-200 my-auto">
+        <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-2xl w-full max-w-md shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-amber-50">
               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                 <ArrowRightLeft size={20} className="text-amber-600" /> Transferir Aluno
               </h3>
-              <button onClick={() => setTransferringStudent(null)} className="p-1 hover:bg-white/50 rounded-full transition-colors">
+              <button onClick={closeTransferModal} className="p-1 hover:bg-white/50 rounded-full transition-colors">
                 <X size={20} className="text-slate-400" />
               </button>
             </div>
@@ -1358,7 +1340,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
               </div>
               <div className="flex gap-3 pt-2">
                 <button 
-                  onClick={() => setTransferringStudent(null)}
+                  onClick={closeTransferModal}
                   className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-lg transition-colors"
                 >
                   Cancelar
@@ -1378,8 +1360,11 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
       {/* Student History Modal */}
       {viewingStudentHistory && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl animate-in zoom-in duration-200 my-auto">
+        <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 border border-indigo-200">
@@ -1394,7 +1379,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                   <p className="text-slate-500 text-sm font-medium">Histórico Financeiro e Contratual</p>
                 </div>
               </div>
-              <button onClick={() => setViewingStudentHistory(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+              <button onClick={closeHistoryModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                 <X size={24} className="text-slate-400" />
               </button>
             </div>
@@ -1489,7 +1474,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
             
             <div className="px-8 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end">
               <button 
-                onClick={() => setViewingStudentHistory(null)}
+                onClick={closeHistoryModal}
                 className="px-6 py-2 bg-slate-200 text-slate-700 rounded-lg font-bold hover:bg-slate-300 transition-colors"
               >
                 Fechar

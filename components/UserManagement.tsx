@@ -27,7 +27,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ data, updateData }) => 
       setIsClosing(false);
       setEditingUser(null);
       setFormData({ name: '', password: '', cpf: '' });
-    }, 300);
+    }, 400);
   };
 
   const handleEdit = (user: User) => {
@@ -151,8 +151,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ data, updateData }) => 
 
       {/* CREATE/EDIT MODAL */}
       {isModalOpen && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-md shadow-2xl my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-md shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
               <div>
                 <h3 className="text-xl font-black text-slate-800 tracking-tight">

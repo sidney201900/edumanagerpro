@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SchoolData, Contract, Student, Payment } from '../types';
 import { useDialog } from '../DialogContext';
-import { Plus, Search, Trash2, X, User, Calendar, FileSignature, ListChecks, Printer, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Trash2, X, User, Calendar, FileSignature, ListChecks, Printer, AlertTriangle, RefreshCw } from 'lucide-react';
 import { pdfService } from '../services/pdfService';
 
 interface ContractsProps {
@@ -14,6 +14,7 @@ const Contracts: React.FC<ContractsProps> = ({ data, updateData }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState<string | null>(null);
   
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [contractToGenerate, setContractToGenerate] = useState<Contract | null>(null);
@@ -122,6 +123,17 @@ const Contracts: React.FC<ContractsProps> = ({ data, updateData }) => {
         updateData({ contracts: data.contracts.filter(c => c.id !== id) });
       }
     );
+  };
+
+  const handleDownloadContract = async (contract: Contract, student: Student) => {
+    setIsGeneratingPDF(contract.id);
+    try {
+      await pdfService.generateContractPDF(contract, student, data);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    } finally {
+      setIsGeneratingPDF(null);
+    }
   };
 
   const openGenerateModal = (contract: Contract) => {
@@ -234,7 +246,18 @@ const Contracts: React.FC<ContractsProps> = ({ data, updateData }) => {
                     </td>
                     <td className="px-6 py-5 text-slate-600 text-sm font-medium"><div className="flex items-center gap-2"><Calendar size={16} className="text-slate-400" /> {new Date(contract.createdAt).toLocaleDateString('pt-BR')}</div></td>
                     <td className="px-6 py-5 text-right flex justify-end gap-2">
-                      <button onClick={() => pdfService.generateContractPDF(contract, student!, data)} className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 rounded-xl transition-all shadow-sm" title="Imprimir Contrato"><Printer size={20} /></button>
+                      <button 
+                        onClick={() => handleDownloadContract(contract, student!)} 
+                        disabled={isGeneratingPDF === contract.id}
+                        className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 rounded-xl transition-all shadow-sm disabled:opacity-50" 
+                        title="Imprimir Contrato"
+                      >
+                        {isGeneratingPDF === contract.id ? (
+                          <RefreshCw size={20} className="animate-spin" />
+                        ) : (
+                          <Printer size={20} />
+                        )}
+                      </button>
                       <button onClick={() => handleDelete(contract.id)} className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-red-600 rounded-xl transition-all shadow-sm" title="Excluir"><Trash2 size={20} /></button>
                     </td>
                   </tr>

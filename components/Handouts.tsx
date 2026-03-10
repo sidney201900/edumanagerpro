@@ -29,12 +29,25 @@ interface HandoutsProps {
 const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
   const { showAlert, showConfirm } = useDialog();
   const [showAddHandout, setShowAddHandout] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'classes' | 'individual'>('classes');
   const [isSyncing, setIsSyncing] = useState(false);
   const [editingHandoutId, setEditingHandoutId] = useState<string | null>(null);
+
+  const closeModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setShowAddHandout(false);
+      setSelectedClass(null);
+      setSelectedStudent(null);
+      setIsClosing(false);
+      setEditingHandoutId(null);
+      setNewHandout({ name: '', price: 0 });
+    }, 400);
+  };
 
   // Sync Asaas payments on mount
   React.useEffect(() => {
@@ -392,16 +405,12 @@ const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
 
       {/* Add Handout Modal */}
       {showAddHandout && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl my-auto animate-in zoom-in-95 duration-200">
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white w-full max-w-md rounded-3xl shadow-2xl my-auto transition-all duration-400 ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
               <h3 className="text-xl font-black">{editingHandoutId ? 'Editar Apostila' : 'Nova Apostila'}</h3>
               <button 
-                onClick={() => {
-                  setShowAddHandout(false);
-                  setEditingHandoutId(null);
-                  setNewHandout({ name: '', price: 0, description: '', finePercentage: 0, interestPercentage: 0 });
-                }} 
+                onClick={closeModal} 
                 className="p-2 hover:bg-white/10 rounded-full transition-colors"
               >
                 <X size={24} />
@@ -472,8 +481,8 @@ const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
 
       {/* Individual Student Management Modal */}
       {selectedStudent && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col my-auto animate-in zoom-in-95 duration-200">
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col my-auto transition-all duration-400 ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white font-black text-xl">
@@ -486,7 +495,7 @@ const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setSelectedStudent(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+              <button onClick={closeModal} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                 <X size={24} />
               </button>
             </div>
@@ -541,14 +550,14 @@ const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
 
       {/* Class Management Modal */}
       {selectedClass && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-5xl h-[85vh] rounded-3xl shadow-2xl flex flex-col my-auto animate-in zoom-in-95 duration-200">
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white w-full max-w-5xl h-[85vh] rounded-3xl shadow-2xl flex flex-col my-auto transition-all duration-400 ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
               <div>
                 <h3 className="text-xl font-black">{selectedClass.name}</h3>
                 <p className="text-xs text-indigo-100 font-bold uppercase tracking-widest">Gestão de Apostilas</p>
               </div>
-              <button onClick={() => setSelectedClass(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+              <button onClick={closeModal} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                 <X size={24} />
               </button>
             </div>

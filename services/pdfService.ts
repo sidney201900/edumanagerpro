@@ -1,20 +1,97 @@
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { SchoolData, Student, Contract, Payment, Class } from '../types';
+import { getImageDimensions } from './imageService';
+
+/**
+ * Helper to calculate proportional dimensions and add image to PDF
+ */
+const addImageProportional = async (doc: any, src: string, x: number, y: number, maxW: number, maxH: number) => {
+  try {
+    const { width, height } = await getImageDimensions(src);
+    const ratio = width / height;
+    
+    let finalW = maxW;
+    let finalH = maxW / ratio;
+    
+    if (finalH > maxH) {
+      finalH = maxH;
+      finalW = maxH * ratio;
+    }
+    
+    // Center in the box
+    const offsetX = (maxW - finalW) / 2;
+    const offsetY = (maxH - finalH) / 2;
+    
+    const format = src.toLowerCase().includes('png') ? 'PNG' : 'JPEG';
+    doc.addImage(src, format, x + offsetX, y + offsetY, finalW, finalH, undefined, 'FAST');
+    return { width: finalW, height: finalH };
+  } catch (e) {
+    console.warn("Image failed to load in PDF", e);
+    return null;
+  }
+};
+
+/**
+ * Helper to process and add a 3x4 student photo with center crop and compression
+ */
+const addStudentPhoto3x4 = async (doc: any, src: string, x: number, y: number) => {
+  return new Promise<{ width: number, height: number } | null>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      // 300x400 for 300 DPI approx (30mm x 40mm)
+      const targetW = 354; // 30mm at 300 DPI is approx 354px
+      const targetH = 472; // 40mm at 300 DPI is approx 472px
+      
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+
+      const imgRatio = img.width / img.height;
+      const targetRatio = targetW / targetH;
+
+      let sourceW, sourceH, sourceX, sourceY;
+
+      if (imgRatio > targetRatio) {
+        // Image is wider than 3x4 - crop sides
+        sourceH = img.height;
+        sourceW = img.height * targetRatio;
+        sourceX = (img.width - sourceW) / 2;
+        sourceY = 0;
+      } else {
+        // Image is taller than 3x4 - crop top/bottom
+        sourceW = img.width;
+        sourceH = img.width / targetRatio;
+        sourceX = 0;
+        sourceY = (img.height - sourceH) / 2;
+      }
+
+      ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, 0, 0, targetW, targetH);
+      
+      // Compress to JPEG with 0.6 quality for instant opening
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      doc.addImage(dataUrl, 'JPEG', x, y, 30, 40, undefined, 'FAST');
+      resolve({ width: 30, height: 40 });
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+};
 
 /**
  * Helper to add header/logo to PDF
  */
-export const addHeader = (doc: any, schoolData: SchoolData) => {
+export const addHeader = async (doc: any, schoolData: SchoolData) => {
   const profile = schoolData.profile;
   
   if (profile.logo) {
-    try {
-      const format = profile.logo.toLowerCase().includes('png') ? 'PNG' : 'JPEG';
-      doc.addImage(profile.logo, format, 20, 10, 25, 25, undefined, 'FAST');
-    } catch (e) {
-      console.warn("Logo image failed to load in PDF", e);
-    }
+    await addImageProportional(doc, profile.logo, 20, 10, 25, 25);
   }
 
   doc.setFontSize(14);
@@ -36,172 +113,136 @@ export const addHeader = (doc: any, schoolData: SchoolData) => {
 };
 
 export const pdfService = {
-  generateStudentRegistrationPDF: (student: Student, schoolData: SchoolData) => {
+  generateStudentRegistrationPDF: async (student: Student, schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
-    const startY = addHeader(doc, schoolData);
+    const startY = await addHeader(doc, schoolData);
     const cls = schoolData.classes.find(c => c.id === student.classId);
     const course = schoolData.courses.find(c => c.id === cls?.courseId);
 
-    // Title
-    doc.setFontSize(18);
-    doc.setTextColor(79, 70, 229);
+    // Title - Professional Vector Text
+    doc.setFontSize(16);
+    doc.setTextColor(30, 41, 59);
     doc.setFont('helvetica', 'bold');
-    doc.text('FICHA DE MATRÍCULA', 105, startY + 10, { align: 'center' });
+    doc.text('FICHA DE MATRÍCULA E REGISTRO ACADÊMICO', 105, startY + 12, { align: 'center' });
     
-    // Student Photo Placeholder if exists
+    // Photo Positioning - Standard 3x4cm (30mm x 40mm)
+    const photoX = 160;
+    const photoY = startY + 20;
+    
     if (student.photo) {
-      try {
-        const format = student.photo.toLowerCase().includes('png') ? 'PNG' : 'JPEG';
-        doc.addImage(student.photo, format, 160, startY + 20, 30, 30, undefined, 'FAST');
+      const imgResult = await addStudentPhoto3x4(doc, student.photo, photoX, photoY);
+      if (!imgResult) {
         doc.setDrawColor(200);
-        doc.rect(160, startY + 20, 30, 30);
-      } catch (e) {
-        doc.setDrawColor(226, 232, 240);
-        doc.rect(160, startY + 20, 30, 30);
-        doc.setFontSize(7);
-        doc.text('FOTO', 175, startY + 37, { align: 'center' });
+        doc.setLineWidth(0.1);
+        doc.rect(photoX, photoY, 30, 40);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text('FOTO 3X4', photoX + 15, photoY + 22, { align: 'center' });
+      } else {
+        // Border around photo
+        doc.setDrawColor(30, 41, 59);
+        doc.setLineWidth(0.2);
+        doc.rect(photoX, photoY, 30, 40);
       }
     } else {
-      doc.setDrawColor(226, 232, 240);
-      doc.rect(160, startY + 20, 30, 30);
-      doc.setFontSize(7);
+      doc.setDrawColor(200);
+      doc.setLineWidth(0.1);
+      doc.rect(photoX, photoY, 30, 40);
+      doc.setFontSize(8);
       doc.setTextColor(150);
-      doc.text('SEM FOTO', 175, startY + 37, { align: 'center' });
+      doc.text('FOTO 3X4', photoX + 15, photoY + 22, { align: 'center' });
     }
 
     let currentY = startY + 25;
 
     // Section: Dados Pessoais
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(79, 70, 229);
     doc.setFont('helvetica', 'bold');
-    doc.text('1. DADOS DO ALUNO', 20, currentY);
+    doc.text('1. DADOS IDENTIFICADORES DO DISCENTE', 20, currentY);
     doc.setDrawColor(79, 70, 229);
-    doc.setLineWidth(0.2);
+    doc.setLineWidth(0.3);
     doc.line(20, currentY + 2, 155, currentY + 2);
 
     currentY += 10;
     doc.setFontSize(9);
     doc.setTextColor(30, 41, 59);
-    doc.setFont('helvetica', 'bold');
-    doc.text('NOME COMPLETO:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(student.name, 55, currentY);
+    
+    const drawField = (label: string, value: string, x: number, y: number, labelW: number) => {
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, x, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(value || '---', x + labelW, y);
+    };
 
+    drawField('NOME COMPLETO:', student.name, 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('CPF:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(student.cpf || 'Não informado', 55, currentY);
-
+    drawField('CPF:', student.cpf, 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('RG:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
+    
     const rgIssue = student.rgIssueDate ? ` (Exp: ${new Date(student.rgIssueDate).toLocaleDateString('pt-BR')})` : '';
-    doc.text(`${student.rg || 'Não informado'}${rgIssue}`, 55, currentY);
-
+    drawField('RG:', `${student.rg || ''}${rgIssue}`, 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('NASCIMENTO:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
+
     const birth = new Date(student.birthDate);
     const ageStr = student.birthDate ? ` (${new Date().getFullYear() - birth.getFullYear()} anos)` : '';
-    doc.text((student.birthDate ? birth.toLocaleDateString('pt-BR') : '---') + ageStr, 55, currentY);
-
+    drawField('NASCIMENTO:', (student.birthDate ? birth.toLocaleDateString('pt-BR') : '---') + ageStr, 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('TELEFONE:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(student.phone, 55, currentY);
-
+    
+    drawField('TELEFONE:', student.phone, 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('E-MAIL:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(student.email, 55, currentY);
+    drawField('E-MAIL:', student.email, 20, currentY, 35);
 
     // Conditional Section: Responsável
     if (student.guardianName) {
       currentY += 12;
-      doc.setFontSize(11);
+      doc.setFontSize(10);
       doc.setTextColor(79, 70, 229);
       doc.setFont('helvetica', 'bold');
-      doc.text('1.1 DADOS DO RESPONSÁVEL', 20, currentY);
-      doc.setDrawColor(79, 70, 229);
-      doc.setLineWidth(0.2);
+      doc.text('1.1 DADOS DO RESPONSÁVEL LEGAL', 20, currentY);
       doc.line(20, currentY + 2, 190, currentY + 2);
 
       currentY += 10;
       doc.setFontSize(9);
       doc.setTextColor(30, 41, 59);
-      doc.setFont('helvetica', 'bold');
-      doc.text('NOME:', 20, currentY);
-      doc.setFont('helvetica', 'normal');
-      doc.text(student.guardianName, 55, currentY);
-
+      drawField('NOME:', student.guardianName, 20, currentY, 35);
       currentY += 7;
-      doc.setFont('helvetica', 'bold');
-      doc.text('CPF:', 20, currentY);
-      doc.setFont('helvetica', 'normal');
-      doc.text(student.guardianCpf || '---', 55, currentY);
+      drawField('CPF:', student.guardianCpf, 20, currentY, 35);
     }
 
     // Section: Informações do Curso
     currentY += 15;
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(79, 70, 229);
     doc.setFont('helvetica', 'bold');
-    doc.text('2. INFORMAÇÕES ACADÊMICAS', 20, currentY);
+    doc.text('2. INFORMAÇÕES ACADÊMICAS E VÍNCULO', 20, currentY);
     doc.line(20, currentY + 2, 190, currentY + 2);
 
     currentY += 10;
     doc.setFontSize(9);
     doc.setTextColor(30, 41, 59);
-    doc.setFont('helvetica', 'bold');
-    doc.text('CURSO:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(course?.name || 'Não vinculado', 55, currentY);
-
+    drawField('CURSO:', course?.name || 'Não vinculado', 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('TURMA:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(cls?.name || 'Não atribuída', 55, currentY);
-
+    drawField('TURMA:', cls?.name || 'Não atribuída', 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('PROFESSOR:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(cls?.teacher || 'N/A', 55, currentY);
-
+    drawField('PROFESSOR:', cls?.teacher || 'N/A', 20, currentY, 35);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('HORÁRIO:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(cls?.schedule || 'N/A', 55, currentY);
+    drawField('HORÁRIO:', cls?.schedule || 'N/A', 20, currentY, 35);
 
     // Section: Status e Registro
     currentY += 15;
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(79, 70, 229);
     doc.setFont('helvetica', 'bold');
-    doc.text('3. STATUS DA MATRÍCULA', 20, currentY);
+    doc.text('3. REGISTRO DE MATRÍCULA', 20, currentY);
     doc.line(20, currentY + 2, 190, currentY + 2);
 
     currentY += 10;
     doc.setFontSize(9);
     doc.setTextColor(30, 41, 59);
-    doc.setFont('helvetica', 'bold');
-    doc.text('DATA DE MATRÍCULA:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(new Date(student.registrationDate).toLocaleDateString('pt-BR'), 65, currentY);
-
+    drawField('DATA DE MATRÍCULA:', new Date(student.registrationDate).toLocaleDateString('pt-BR'), 20, currentY, 45);
     currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('SITUAÇÃO ATUAL:', 20, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(student.status === 'active' ? 'ATIVO / REGULAR' : 'INATIVO / TRANCADO', 65, currentY);
+    drawField('SITUAÇÃO ATUAL:', student.status === 'active' ? 'ATIVO / REGULAR' : 'INATIVO / TRANCADO', 20, currentY, 45);
 
     // Footer - Signatures
     const pageHeight = doc.internal.pageSize.height;
@@ -209,19 +250,20 @@ export const pdfService = {
     doc.setTextColor(150);
     doc.text('Documento gerado eletronicamente em: ' + new Date().toLocaleString('pt-BR'), 105, pageHeight - 15, { align: 'center' });
     
-    doc.setDrawColor(200);
+    doc.setDrawColor(30, 41, 59);
+    doc.setLineWidth(0.2);
     doc.line(25, pageHeight - 45, 90, pageHeight - 45);
-    doc.text(student.guardianName ? 'ASSINATURA RESPONSÁVEL' : 'ASSINATURA DO ALUNO', 57.5, pageHeight - 40, { align: 'center' });
+    doc.text(student.guardianName ? 'ASSINATURA DO RESPONSÁVEL' : 'ASSINATURA DO ALUNO', 57.5, pageHeight - 40, { align: 'center' });
 
     doc.line(120, pageHeight - 45, 185, pageHeight - 45);
-    doc.text('COORDENAÇÃO ESCOLAR', 152.5, pageHeight - 40, { align: 'center' });
+    doc.text('COORDENAÇÃO ACADÊMICA', 152.5, pageHeight - 40, { align: 'center' });
 
-    doc.save(`ficha_cadastro_${student.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
+    doc.save(`ficha_matricula_${student.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   },
 
-  generateStudentHistoryPDF: (student: Student, schoolData: SchoolData) => {
+  generateStudentHistoryPDF: async (student: Student, schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
-    const startY = addHeader(doc, schoolData);
+    const startY = await addHeader(doc, schoolData);
     const payments = schoolData.payments.filter(p => p.studentId === student.id);
     const contracts = schoolData.contracts.filter(c => c.studentId === student.id);
 
@@ -236,8 +278,8 @@ export const pdfService = {
     doc.autoTable({
       startY: startY + 25,
       margin: { top: 45 },
-      didDrawPage: (data: any) => {
-        if (data.pageNumber > 1) addHeader(doc, schoolData);
+      didDrawPage: async (data: any) => {
+        if (data.pageNumber > 1) await addHeader(doc, schoolData);
       },
       head: [['Título', 'Data Emissão']],
       body: contracts.map(c => [
@@ -254,8 +296,8 @@ export const pdfService = {
     doc.autoTable({
       startY: nextY + 5,
       margin: { top: 45 },
-      didDrawPage: (data: any) => {
-        if (data.pageNumber > 1) addHeader(doc, schoolData);
+      didDrawPage: async (data: any) => {
+        if (data.pageNumber > 1) await addHeader(doc, schoolData);
       },
       head: [['Descrição', 'Vencimento', 'Valor', 'Status']],
       body: payments.map(p => [
@@ -270,7 +312,7 @@ export const pdfService = {
     doc.save(`historico_${student.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   },
 
-  generatePaymentReceiptPDF: (payment: Payment, student: Student, schoolData: SchoolData) => {
+  generatePaymentReceiptPDF: async (payment: Payment, student: Student, schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
     
     doc.setDrawColor(79, 70, 229);
@@ -279,8 +321,7 @@ export const pdfService = {
 
     const profile = schoolData.profile;
     if (profile.logo) {
-       const format = profile.logo.toLowerCase().includes('png') ? 'PNG' : 'JPEG';
-       doc.addImage(profile.logo, format, 20, 15, 20, 20, undefined, 'FAST');
+       await addImageProportional(doc, profile.logo, 20, 15, 20, 20);
     }
     doc.setFontSize(12);
     doc.setTextColor(30, 41, 59);
@@ -323,9 +364,9 @@ export const pdfService = {
     doc.save(`recibo_${student.name.replace(/\s+/g, '_').toLowerCase()}_${payment.id.substring(0, 4)}.pdf`);
   },
 
-  generateContractPDF: (contract: Contract, student: Student, schoolData: SchoolData) => {
+  generateContractPDF: async (contract: Contract, student: Student, schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
-    let currentY = addHeader(doc, schoolData);
+    let currentY = await addHeader(doc, schoolData);
     
     doc.setFontSize(16);
     doc.setTextColor(30, 41, 59);
@@ -357,8 +398,8 @@ export const pdfService = {
         fontStyle: 'normal'
       },
       margin: { top: 45, bottom: 60, left: 20, right: 20 },
-      didDrawPage: (data: any) => {
-        if (data.pageNumber > 1) addHeader(doc, schoolData);
+      didDrawPage: async (data: any) => {
+        if (data.pageNumber > 1) await addHeader(doc, schoolData);
       }
     });
 
@@ -368,7 +409,7 @@ export const pdfService = {
     // Check if signatures fit on the current page
     if (finalY > pageHeight - 40) {
       doc.addPage();
-      addHeader(doc, schoolData);
+      await addHeader(doc, schoolData);
       finalY = 60;
     }
 
@@ -387,9 +428,9 @@ export const pdfService = {
     doc.save(`contrato_${contract.title.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   },
 
-  generateClassListPDF: (cls: Class, schoolData: SchoolData) => {
+  generateClassListPDF: async (cls: Class, schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
-    const startY = addHeader(doc, schoolData);
+    const startY = await addHeader(doc, schoolData);
     const course = schoolData.courses.find(c => c.id === cls.courseId);
     const students = schoolData.students.filter(s => s.classId === cls.id);
 
@@ -406,8 +447,8 @@ export const pdfService = {
     doc.autoTable({
       startY: startY + 35,
       margin: { top: 45 },
-      didDrawPage: (data: any) => {
-        if (data.pageNumber > 1) addHeader(doc, schoolData);
+      didDrawPage: async (data: any) => {
+        if (data.pageNumber > 1) await addHeader(doc, schoolData);
       },
       head: [['Nº', 'Nome do Aluno', 'Telefone', 'Status']],
       body: students.map((s, idx) => [
@@ -422,9 +463,9 @@ export const pdfService = {
     doc.save(`turma_${cls.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   },
 
-  generateStudentListPDF: (schoolData: SchoolData) => {
+  generateStudentListPDF: async (schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
-    const startY = addHeader(doc, schoolData);
+    const startY = await addHeader(doc, schoolData);
 
     doc.setFontSize(16);
     doc.setTextColor(30, 41, 59);
@@ -433,8 +474,8 @@ export const pdfService = {
     doc.autoTable({
       startY: startY + 15,
       margin: { top: 45 },
-      didDrawPage: (data: any) => {
-        if (data.pageNumber > 1) addHeader(doc, schoolData);
+      didDrawPage: async (data: any) => {
+        if (data.pageNumber > 1) await addHeader(doc, schoolData);
       },
       head: [['Nome', 'CPF', 'Email', 'Turma', 'Status']],
       body: schoolData.students.map(s => {
@@ -453,9 +494,9 @@ export const pdfService = {
     doc.save(`lista_alunos_${new Date().toISOString().split('T')[0]}.pdf`);
   },
 
-  generateFullSchoolReportPDF: (schoolData: SchoolData) => {
+  generateFullSchoolReportPDF: async (schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
-    const startY = addHeader(doc, schoolData);
+    const startY = await addHeader(doc, schoolData);
     
     doc.setFontSize(18);
     doc.setTextColor(30, 41, 59);
@@ -471,8 +512,8 @@ export const pdfService = {
     doc.autoTable({
       startY: startY + 50,
       margin: { top: 45 },
-      didDrawPage: (data: any) => {
-        if (data.pageNumber > 1) addHeader(doc, schoolData);
+      didDrawPage: async (data: any) => {
+        if (data.pageNumber > 1) await addHeader(doc, schoolData);
       },
       head: [['Alunos', 'Turmas', 'Financeiro Pago', 'Pendente']],
       body: [[

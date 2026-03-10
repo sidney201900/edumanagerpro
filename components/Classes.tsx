@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SchoolData, Class } from '../types';
 import { useDialog } from '../DialogContext';
-import { Plus, Edit2, Trash2, X, Clock, User, Book, GraduationCap, Printer, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Clock, User, Book, GraduationCap, Printer, AlertTriangle, RefreshCw } from 'lucide-react';
 import { pdfService } from '../services/pdfService';
 
 interface ClassesProps {
@@ -14,6 +14,7 @@ const Classes: React.FC<ClassesProps> = ({ data, updateData }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<Omit<Class, 'id'>>({
     name: '',
@@ -48,7 +49,7 @@ const Classes: React.FC<ClassesProps> = ({ data, updateData }) => {
       setIsClosing(false);
       setEditingClass(null);
       setFormData({ name: '', courseId: '', teacher: '', schedule: '', maxStudents: 15 });
-    }, 300);
+    }, 400);
   };
 
   const handleEdit = (cls: Class) => {
@@ -65,6 +66,17 @@ const Classes: React.FC<ClassesProps> = ({ data, updateData }) => {
         updateData({ classes: data.classes.filter(c => c.id !== id) });
       }
     );
+  };
+
+  const handleDownloadClassList = async (cls: Class) => {
+    setIsGeneratingPDF(cls.id);
+    try {
+      await pdfService.generateClassListPDF(cls, data);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    } finally {
+      setIsGeneratingPDF(null);
+    }
   };
 
   const inputClass = "w-full px-4 py-3 bg-white text-black border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm";
@@ -98,8 +110,17 @@ const Classes: React.FC<ClassesProps> = ({ data, updateData }) => {
                   <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em]">{course?.name || 'Sem Curso Vinculado'}</span>
                 </div>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => pdfService.generateClassListPDF(cls, data)} className="p-2 text-slate-400 hover:text-indigo-600 rounded-lg transition-all" title="Imprimir Diário">
-                    <Printer size={16} />
+                  <button 
+                    onClick={() => handleDownloadClassList(cls)} 
+                    disabled={isGeneratingPDF === cls.id}
+                    className="p-2 text-slate-400 hover:text-indigo-600 rounded-lg transition-all disabled:opacity-50" 
+                    title="Imprimir Diário"
+                  >
+                    {isGeneratingPDF === cls.id ? (
+                      <RefreshCw size={16} className="animate-spin" />
+                    ) : (
+                      <Printer size={16} />
+                    )}
                   </button>
                   <button onClick={() => handleEdit(cls)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded-lg transition-all">
                     <Edit2 size={16} />
@@ -154,8 +175,11 @@ const Classes: React.FC<ClassesProps> = ({ data, updateData }) => {
       </div>
 
       {isModalOpen && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-md shadow-2xl my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-md shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
               <div>
                 <h3 className="text-2xl font-black text-slate-800 tracking-tight">

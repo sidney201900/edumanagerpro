@@ -22,12 +22,12 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const [isClosing, setIsClosing] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showExtraChargeModal, setShowExtraChargeModal] = useState(false); // Changed from Bulk
   
   // Selection states
   const [selectedStudentHistory, setSelectedStudentHistory] = useState<Student | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   React.useEffect(() => {
     syncAsaasPayments();
@@ -158,36 +158,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
   }, [formData.studentId, selectedItemId, data.students, data.classes, data.courses, data.handouts]);
 
-  // Extra Charge Specific State
-  const [extraChargeData, setExtraChargeData] = useState({
-    studentId: '',
-    amount: 0,
-    installments: 1,
-    description: 'Taxa Extra',
-    firstDueDate: new Date().toLocaleDateString('pt-BR'),
-    discount: 0,
-    discountType: 'fixed' as 'fixed' | 'percentage',
-    fine: 0,
-    interest: 0
-  });
-
-  // Auto-fill fine and interest for extra charge based on student's course
-  React.useEffect(() => {
-    if (extraChargeData.studentId) {
-      const student = data.students.find(s => s.id === extraChargeData.studentId);
-      if (student) {
-        const studentClass = data.classes.find(c => c.id === student.classId);
-        const course = data.courses.find(c => c.id === studentClass?.courseId);
-        
-        setExtraChargeData(prev => ({
-          ...prev,
-          fine: course?.finePercentage || 0,
-          interest: course?.interestPercentage || 0
-        }));
-      }
-    }
-  }, [extraChargeData.studentId, data.students, data.classes, data.courses]);
-
   const formatDateMask = (val: string) => {
     return val.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2').replace(/(\d{2})(\d)/, '$1/$2').slice(0, 10);
   };
@@ -220,6 +190,17 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     if (!val) {
       setSelectedItemType('');
       setFormData(prev => ({...prev, amount: 0, description: ''}));
+      return;
+    }
+
+    if (val === 'registration_fee') {
+      setSelectedItemType('registration');
+      setFormData(prev => ({
+        ...formData,
+        amount: 150, // Default registration fee
+        description: 'Taxa de Matrícula',
+        type: 'registration'
+      }));
       return;
     }
 
@@ -383,117 +364,12 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     closeModal();
   };
 
-  const handleCreateExtraCharge = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!extraChargeData.studentId || extraChargeData.amount <= 0 || !extraChargeData.description) {
-      showAlert('Atenção', '⚠️ Por favor, preencha todos os campos da cobrança avulsa.', 'warning');
-      return;
-    }
-
-    const student = data.students.find(s => s.id === extraChargeData.studentId);
-    if (!student) {
-      showAlert('Erro', 'Aluno não encontrado.', 'error');
-      return;
-    }
-
-    const newPayments: Payment[] = [];
-    
-    let baseDateStr = '';
-    if (extraChargeData.firstDueDate.length === 10) {
-        baseDateStr = dateBrToIso(extraChargeData.firstDueDate);
-    }
-    const baseDate = new Date(baseDateStr);
-    const installments = extraChargeData.installments || 1;
-    const amountPerInstallment = extraChargeData.amount / installments;
-
-    for (let i = 0; i < installments; i++) {
-      const dueDate = new Date(baseDate);
-      dueDate.setMonth(baseDate.getMonth() + i);
-
-      const { fine, ...rest } = extraChargeData;
-      const paymentDueDate = dueDate.toISOString().split('T')[0];
-
-      newPayments.push({
-        ...rest,
-        lateFee: fine,
-        id: crypto.randomUUID(),
-        studentId: extraChargeData.studentId,
-        amount: amountPerInstallment,
-        discount: extraChargeData.discount || 0,
-        discountType: extraChargeData.discountType || 'fixed',
-        interest: extraChargeData.interest || 0,
-        dueDate: paymentDueDate,
-        status: 'pending',
-        type: 'other',
-        installmentNumber: installments > 1 ? i + 1 : undefined,
-        totalInstallments: installments > 1 ? installments : undefined,
-        description: installments > 1 
-          ? `${extraChargeData.description} (${i + 1}/${installments})`
-          : extraChargeData.description
-      });
-    }
-
-    try {
-      const asaasRequests = newPayments.map(payment => {
-        const rawCpf = (student.cpf || student.guardianCpf || '').replace(/\D/g, '');
-        // Garantir que a data esteja em formato ISO YYYY-MM-DD (string pura)
-        const isoDueDate = payment.dueDate;
-
-        return fetch('/api/gerar_cobranca', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            aluno_id: student.id,
-            nome: student.name,
-            cpf: rawCpf,
-            email: student.email,
-            valor: payment.amount,
-            vencimento: isoDueDate,
-            multa: payment.lateFee,
-            juros: payment.interest,
-            desconto: Number(payment.discount) || 0,
-            telefone: student.phone,
-            cep: student.addressZip,
-            endereco: student.addressStreet,
-            numero: student.addressNumber,
-            bairro: student.addressNeighborhood,
-            nascimento: student.birthDate,
-            descricao: payment.description,
-            parcelas: 1
-          })
-        });
-      });
-
-      const asaasResponses = await Promise.all(asaasRequests);
-      const asaasData = await Promise.all(asaasResponses.map(async r => {
-        if (r.ok) return r.json();
-        return null;
-      }));
-      
-      newPayments.forEach((p, idx) => {
-        if (asaasData[idx]) {
-          p.asaasPaymentUrl = asaasData[idx].bankSlipUrl;
-          p.asaasPaymentId = asaasData[idx].paymentId;
-        }
-      });
-    } catch (error) {
-      console.error('Erro ao conectar com o Asaas:', error);
-      showAlert('Atenção', 'Erro ao conectar com o Asaas. Lançamentos salvos apenas localmente.', 'warning');
-    }
-
-    updateData({ payments: [...data.payments, ...newPayments] });
-    showAlert('Sucesso', 'Nova cobrança gerada com sucesso.', 'success');
-    closeModal();
-  };
-
   const closeModal = () => {
     setIsClosing(true);
     setTimeout(() => {
       setIsModalOpen(false);
       setShowHistoryModal(false);
       setShowDeleteModal(false);
-      setShowExtraChargeModal(false);
       setIsClosing(false);
       
       setManualInstallments(1);
@@ -509,17 +385,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         dueDate: today.toISOString().split('T')[0],
         type: 'monthly',
         description: ''
-      });
-      setExtraChargeData({
-        studentId: '',
-        amount: 0,
-        installments: 1,
-        description: 'Taxa Extra',
-        firstDueDate: today.toLocaleDateString('pt-BR'),
-        discount: 0,
-        discountType: 'fixed',
-        fine: 0,
-        interest: 0
       });
       setSelectedStudentHistory(null);
       setPaymentToDelete(null);
@@ -607,10 +472,18 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     setShowDeleteModal(true);
   };
 
-  const handleDownloadReceipt = (payment: Payment) => {
+  const handleDownloadReceipt = async (payment: Payment) => {
     const student = data.students.find(s => s.id === payment.studentId);
     if (student) {
-      pdfService.generatePaymentReceiptPDF(payment, student, data);
+      setIsGeneratingPDF(true);
+      try {
+        await pdfService.generatePaymentReceiptPDF(payment, student, data);
+      } catch (error) {
+        console.error('Erro ao gerar recibo:', error);
+        showAlert('Erro', 'Falha ao gerar o recibo em PDF.', 'error');
+      } finally {
+        setIsGeneratingPDF(false);
+      }
     }
   };
 
@@ -661,24 +534,10 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         </div>
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <button 
-            onClick={syncAsaasPayments}
-            disabled={isSyncing}
-            className={`flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm font-bold active:scale-95 ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <RefreshCw size={20} className={`text-indigo-500 ${isSyncing ? 'animate-spin' : ''}`} /> 
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar Asaas'}
-          </button>
-          <button 
             onClick={() => setIsModalOpen(true)}
             className="flex-1 sm:flex-none bg-indigo-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg font-bold active:scale-95"
           >
             <Plus size={20} /> Novo Lançamento
-          </button>
-          <button 
-            onClick={() => setShowExtraChargeModal(true)}
-            className="flex-1 sm:flex-none bg-white border border-slate-200 text-slate-700 px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm font-bold active:scale-95"
-          >
-            <DollarSign size={20} className="text-emerald-500" /> Cobrança Avulsa
           </button>
         </div>
       </div>
@@ -772,7 +631,14 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                     </td>
                     <td className="px-6 py-5">{getStatusBadge(payment)}</td>
                     <td className="px-6 py-5 text-right flex justify-end gap-2">
-                      <button onClick={() => handleDownloadReceipt(payment)} className="p-2 text-slate-400 hover:text-indigo-600 transition-all" title="Recibo"><Printer size={18} /></button>
+                      <button 
+                        onClick={() => handleDownloadReceipt(payment)} 
+                        disabled={isGeneratingPDF}
+                        className="p-2 text-slate-400 hover:text-indigo-600 transition-all disabled:opacity-50" 
+                        title="Recibo"
+                      >
+                        {isGeneratingPDF ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
+                      </button>
                       <button onClick={() => togglePaymentStatus(payment)} className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${payment.status === 'paid' ? 'text-slate-400 border-slate-200' : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}>{payment.status === 'paid' ? 'Estornar' : 'Baixar'}</button>
                       <button onClick={() => openDelete(payment)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir"><Trash2 size={18} /></button>
                     </td>
@@ -793,8 +659,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
       {/* NEW PAYMENT MODAL */}
       {isModalOpen && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-lg shadow-2xl my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-lg shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
               <div>
                 <h3 className="text-xl font-black text-slate-800 tracking-tight">Novo Lançamento</h3>
@@ -819,6 +688,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Referente a (Opcional)</label>
                 <select className={inputClass + " w-full"} value={selectedItemId} onChange={handleItemSelect}>
                   <option value="">Lançamento Avulso / Personalizado</option>
+                  <option value="registration_fee">Taxa de Matrícula Padrão</option>
                   <optgroup label="Cursos">
                     {data.courses?.map(c => <option key={`course_${c.id}`} value={`course_${c.id}`}>{c.name} - R$ {c.monthlyFee.toFixed(2)}</option>)}
                   </optgroup>
@@ -893,8 +763,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
       {/* STUDENT HISTORY MODAL */}
       {showHistoryModal && selectedStudentHistory && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <div>
                 <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
@@ -942,8 +815,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
       {/* DELETE CONFIRMATION MODAL */}
       {showDeleteModal && paymentToDelete && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-sm shadow-2xl my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-sm shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-6 text-center">
               <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Trash2 size={24} />
@@ -965,111 +841,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* EXTRA CHARGE MODAL (formerly Bulk Generate) */}
-      {showExtraChargeModal && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-300 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-md shadow-2xl my-auto transition-all duration-300 ${isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100 animate-zoom-in'}`}>
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-emerald-50">
-              <div>
-                <h3 className="text-xl font-black text-slate-800">Cobrança Avulsa / Extra</h3>
-                <p className="text-xs text-emerald-800">Gere cobranças específicas para um aluno.</p>
-              </div>
-              <button onClick={closeModal} className="p-2 text-slate-400 hover:text-slate-600"><X size={20}/></button>
-            </div>
-            <form onSubmit={handleCreateExtraCharge} className="p-6 space-y-4">
-              <SearchableSelect
-                label="Selecione o Aluno"
-                placeholder="Selecione o aluno..."
-                required
-                options={data.students.map(s => ({
-                  id: s.id,
-                  name: s.name,
-                  subtext: data.classes.find(c => c.id === s.classId)?.name || 'Sem Turma'
-                }))}
-                value={extraChargeData.studentId}
-                onChange={val => setExtraChargeData({...extraChargeData, studentId: val})}
-              />
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descrição</label>
-                <input 
-                  required
-                  className={inputClass + " w-full"} 
-                  placeholder="Ex: Material Didático"
-                  value={extraChargeData.description} 
-                  onChange={e => setExtraChargeData({...extraChargeData, description: e.target.value})} 
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Valor Total (R$)</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    required 
-                    className={inputClass + " w-full"} 
-                    value={extraChargeData.amount} 
-                    onChange={e => setExtraChargeData({...extraChargeData, amount: parseFloat(e.target.value)})} 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Parcelas</label>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    required 
-                    className={inputClass + " w-full"} 
-                    value={extraChargeData.installments} 
-                    onChange={e => setExtraChargeData({...extraChargeData, installments: parseInt(e.target.value) || 1})} 
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Multa (%)</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    className={inputClass + " w-full"} 
-                    value={extraChargeData.fine} 
-                    onChange={e => setExtraChargeData({...extraChargeData, fine: parseFloat(e.target.value) || 0})} 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Juros ao Mês (%)</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    className={inputClass + " w-full"} 
-                    value={extraChargeData.interest} 
-                    onChange={e => setExtraChargeData({...extraChargeData, interest: parseFloat(e.target.value) || 0})} 
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Vencimento (1ª Parcela)</label>
-                <input 
-                  required 
-                  className={inputClass + " w-full"} 
-                  placeholder="DD/MM/AAAA"
-                  maxLength={10}
-                  value={extraChargeData.firstDueDate} 
-                  onChange={e => setExtraChargeData({...extraChargeData, firstDueDate: formatDateMask(e.target.value)})} 
-                />
-              </div>
-              
-              <div className="pt-2 flex gap-3">
-                <button type="button" onClick={closeModal} className="flex-1 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 text-xs">
-                  Cancelar
-                </button>
-                <button type="submit" className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 text-xs">
-                  Gerar Cobrança
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

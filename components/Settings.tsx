@@ -5,6 +5,8 @@ import { Download, Upload, Trash2, Database, School, Camera, FileText, Info, Ale
 import { isSupabaseConfigured } from '../services/supabase';
 import { useDialog } from '../DialogContext';
 
+import { compressImage } from '../services/imageService';
+
 interface SettingsProps {
   data: SchoolData;
   updateData: (newData: Partial<SchoolData>) => void;
@@ -82,14 +84,16 @@ using (true);`;
     }, 300);
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfile(prev => ({ ...prev, logo: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file);
+        setProfile(prev => ({ ...prev, logo: compressed }));
+      } catch (error) {
+        console.error('Erro ao comprimir imagem:', error);
+        showAlert('Erro', 'Falha ao processar imagem.', 'error');
+      }
     }
   };
 
@@ -276,14 +280,11 @@ using (true);`;
             </div>
 
             {supabaseConfigured && (
-              <button 
-                onClick={handleManualSync}
-                disabled={isSyncing}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-bold text-xs shadow-md disabled:opacity-50"
-              >
-                <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
-                {isSyncing ? 'Sincronizando...' : 'Sincronizar Agora'}
-              </button>
+              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700">
+                <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                  <CheckCircle size={14} /> Sincronização Automática Ativa
+                </p>
+              </div>
             )}
 
             <button 

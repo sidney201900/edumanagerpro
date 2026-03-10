@@ -17,11 +17,25 @@ const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({ data, updateData 
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   
   // Auto-detected state
   const [detectedStudentId, setDetectedStudentId] = useState<string | null>(null);
   const [detectedClassId, setDetectedClassId] = useState<string | null>(null);
+
+  const closeModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setCapturedImage(null);
+      setShowConfirmModal(false);
+      setDetectedStudentId(null);
+      setDetectedClassId(null);
+      setIsProcessing(false);
+      setIsClosing(false);
+      stopCamera();
+    }, 400);
+  };
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -232,17 +246,12 @@ const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({ data, updateData 
     setDetectedStudentId(null);
     setDetectedClassId(null);
     setIsProcessing(false);
-    stopCamera(); // Stop camera as requested after recognition
+    closeModal();
     showAlert('Sucesso', "Presença confirmada com sucesso!", 'success');
   };
 
   const cancelCapture = () => {
-    setCapturedImage(null);
-    setShowConfirmModal(false);
-    setDetectedStudentId(null);
-    setDetectedClassId(null);
-    setIsProcessing(false);
-    stopCamera(); // Stop camera as requested after recognition
+    closeModal();
   };
 
   const detectedStudent = data.students.find(s => s.id === detectedStudentId);
@@ -334,8 +343,11 @@ const AttendanceCapture: React.FC<AttendanceCaptureProps> = ({ data, updateData 
 
       {/* Confirmation Modal */}
       {showConfirmModal && capturedImage && detectedStudent && (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in duration-300">
+        <div className={`fixed inset-0 bg-black/95 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl transition-all duration-400 relative ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            {/* Blue Top Bar */}
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
             <div className="p-8 text-center space-y-6">
               <div className="space-y-1">
                 <h3 className="text-2xl font-black text-slate-800">Identificado!</h3>
