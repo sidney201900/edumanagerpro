@@ -1,8 +1,11 @@
 export interface User {
   id: string;
-  name: string;
+  name: string; // Username
+  displayName?: string; // Real name
+  photoURL?: string; // Profile photo URL
   password: string; // In a real app, this should be hashed
   cpf: string;
+  role?: 'admin' | 'user';
 }
 
 export interface Course {
@@ -43,6 +46,7 @@ export interface Student {
   addressState?: string;
   discount?: number;
   hasGuardian?: boolean;
+  contractTemplateId?: string; // Vínculo com o modelo de contrato
 }
 
 export interface Class {
@@ -89,7 +93,12 @@ export interface SchoolProfile {
   phone: string;
   email: string;
   logo?: string; // Base64
-  contractTemplate?: string; // Modelo global de contrato
+}
+
+export interface ContractTemplate {
+  id: string;
+  name: string;
+  content: string;
 }
 
 export interface TextOverlay {
@@ -171,6 +180,21 @@ export interface HandoutDelivery {
   asaasPaymentUrl?: string;
 }
 
+export interface EmployeeCategory {
+  id: string;
+  name: string;
+}
+
+export interface Employee {
+  id: string;
+  name: string;
+  cpf: string;
+  phone: string;
+  email: string;
+  admissionDate: string;
+  categoryId: string;
+}
+
 export interface SchoolData {
   users: User[];
   courses: Course[];
@@ -178,6 +202,7 @@ export interface SchoolData {
   classes: Class[];
   payments: Payment[];
   contracts: Contract[];
+  contractTemplates?: ContractTemplate[];
   certificates: Certificate[];
   certificateTemplates?: CertificateTemplate[];
   attendance: Attendance[];
@@ -186,6 +211,8 @@ export interface SchoolData {
   grades: Grade[];
   handouts?: Handout[];
   handoutDeliveries?: HandoutDelivery[];
+  employees?: Employee[];
+  employeeCategories?: EmployeeCategory[];
   profile: SchoolProfile;
   lastUpdated?: string;
 }
@@ -202,6 +229,7 @@ export enum View {
   AttendanceQuery = 'attendance_query',
   ReportCard = 'report_card',
   Handouts = 'handouts',
+  Employees = 'employees',
   Settings = 'settings',
   Users = 'users'
 }

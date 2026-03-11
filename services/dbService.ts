@@ -31,14 +31,22 @@ const initialData: SchoolData = {
   grades: [],
   handouts: [],
   handoutDeliveries: [],
+  employees: [],
+  employeeCategories: [],
   profile: {
     name: 'EduManager School',
     address: '',
     cnpj: '',
     phone: '',
     email: '',
-    contractTemplate: initialContractTemplate
   },
+  contractTemplates: [
+    {
+      id: 'default-template',
+      name: 'Contrato Padrão',
+      content: initialContractTemplate
+    }
+  ],
   lastUpdated: new Date(0).toISOString()
 };
 
@@ -105,16 +113,30 @@ export const dbService = {
           };
 
           if (finalData.users.length === 0) {
-            finalData.users.push({ id: 'default-admin', name: 'admin', password: 'admin', cpf: '000.000.000-00' });
+            finalData.users.push({ 
+              id: 'default-admin', 
+              name: 'admin', 
+              displayName: 'Administrador',
+              password: 'admin', 
+              cpf: '000.000.000-00',
+              role: 'admin'
+            });
           }
           resolve(finalData);
         };
       });
     } catch (error) {
       console.error("Error loading IDB data", error);
-      const fallbackData = JSON.parse(JSON.stringify(initialData));
-      fallbackData.users.push({ id: 'default-admin', name: 'admin', password: 'admin', cpf: '000.000.000-00' });
-      return fallbackData;
+    const fallbackData = JSON.parse(JSON.stringify(initialData));
+    fallbackData.users.push({ 
+      id: 'default-admin', 
+      name: 'admin', 
+      displayName: 'Administrador',
+      password: 'admin', 
+      cpf: '000.000.000-00',
+      role: 'admin'
+    });
+    return fallbackData;
     }
   },
 
@@ -161,8 +183,10 @@ export const dbService = {
             fetchedData.users.push({
                 id: 'default-admin',
                 name: 'admin',
+                displayName: 'Administrador',
                 password: 'admin',
-                cpf: '000.000.000-00'
+                cpf: '000.000.000-00',
+                role: 'admin'
             });
         }
 

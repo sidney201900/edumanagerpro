@@ -27,3 +27,28 @@ try {
 }
 
 export const supabase = supabaseClient;
+
+export const uploadProfilePicture = async (userId: string, file: File): Promise<string | null> => {
+  if (!isSupabaseConfigured()) return null;
+
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${userId}-${Math.random()}.${fileExt}`;
+    const filePath = `profiles/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('edumanager-assets')
+      .upload(filePath, file);
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from('edumanager-assets')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  } catch (error) {
+    console.error('Error uploading profile picture:', error);
+    return null;
+  }
+};

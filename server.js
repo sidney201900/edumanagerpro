@@ -81,33 +81,54 @@ app.post('/api/gerar_cobranca', async (req, res) => {
       telefone, cep, endereco, numero, bairro, descricao, parcelas
     } = req.body;
 
-    // 1. Create Asaas Customer
-    const customerRes = await fetch('https://sandbox.asaas.com/api/v3/customers', {
-      method: 'POST',
+    // 1. Search or Create Asaas Customer
+    let customerId = '';
+    
+    // Try to find customer by CPF first
+    const searchRes = await fetch(`https://sandbox.asaas.com/api/v3/customers?cpfCnpj=${cpf}`, {
+      method: 'GET',
       headers: {
-        'Content-Type': 'application/json',
         'access_token': process.env.ASAAS_API_KEY
-      },
-      body: JSON.stringify({
-        name: nome,
-        cpfCnpj: cpf,
-        email: email,
-        mobilePhone: telefone,
-        postalCode: cep,
-        address: endereco,
-        addressNumber: numero,
-        province: bairro
-      })
+      }
     });
 
-    if (!customerRes.ok) {
-      const errorData = await customerRes.json();
-      console.error('Asaas Customer Error:', errorData);
-      throw new Error('Falha ao criar cliente no Asaas');
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      if (searchData.data && searchData.data.length > 0) {
+        customerId = searchData.data[0].id;
+      }
     }
 
-    const customerData = await customerRes.json();
-    const customerId = customerData.id;
+    if (!customerId) {
+      const customerRes = await fetch('https://sandbox.asaas.com/api/v3/customers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'access_token': process.env.ASAAS_API_KEY
+        },
+        body: JSON.stringify({
+          name: nome,
+          cpfCnpj: cpf,
+          email: email,
+          mobilePhone: telefone,
+          postalCode: cep,
+          address: endereco,
+          addressNumber: numero,
+          province: bairro
+        })
+      });
+
+      if (!customerRes.ok) {
+        const errorData = await customerRes.json();
+        console.error('Asaas Customer Error:', errorData);
+        // Extract specific error message from Asaas if available
+        const asaasMsg = errorData.errors?.[0]?.description || 'Falha ao criar cliente no Asaas';
+        throw new Error(asaasMsg);
+      }
+
+      const customerData = await customerRes.json();
+      customerId = customerData.id;
+    }
 
     // 2. Create Asaas Payment
     const asaasPayload = {
@@ -144,7 +165,8 @@ app.post('/api/gerar_cobranca', async (req, res) => {
     if (!paymentRes.ok) {
       const errorData = await paymentRes.json();
       console.error('Asaas Payment Error:', errorData);
-      throw new Error('Falha ao criar cobrança no Asaas');
+      const asaasMsg = errorData.errors?.[0]?.description || 'Falha ao criar cobrança no Asaas';
+      throw new Error(asaasMsg);
     }
 
     const paymentData = await paymentRes.json();
@@ -241,6 +263,73 @@ app.post('/api/excluir_cobranca', async (req, res) => {
   } catch (error) {
     console.error('Erro na função excluir_cobranca:', error);
     return res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// Buscar Carnê (Payment Book) do Aluno
+app.get('/api/alunos/:id/carne', async (req, res) => {
+  try {
+    const alunoId = req.params.id;
+
+    // 1. Buscar a cobrança mais recente do aluno para pegar o ID do Asaas
+    const { data, error: dbError } = await supabase
+      .from('alunos_cobrancas')
+      .select('asaas_payment_id')
+      .eq('aluno_id', alunoId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (dbError || !data) {
+      console.error('Cobrança não encontrada para o aluno:', alunoId, dbError);
+      return res.status(404).json({ error: 'Nenhuma cobrança encontrada para este aluno.' });
+    }
+
+    const asaasPaymentId = data.asaas_payment_id;
+
+    // 2. Buscar detalhes do pagamento no Asaas
+    const paymentRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${asaasPaymentId}`, {
+      method: 'GET',
+      headers: {
+        'access_token': process.env.ASAAS_API_KEY
+      }
+    });
+
+    if (!paymentRes.ok) {
+      const errorData = await paymentRes.json();
+      console.error('Erro ao buscar pagamento no Asaas:', errorData);
+      return res.status(500).json({ error: 'Erro ao buscar dados no Asaas.' });
+    }
+
+    const paymentData = await paymentRes.json();
+
+    // 3. Se for um parcelamento, buscar o carnê do parcelamento
+    if (paymentData.installment) {
+      const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${paymentData.installment}`, {
+        method: 'GET',
+        headers: {
+          'access_token': process.env.ASAAS_API_KEY
+        }
+      });
+
+      if (installmentRes.ok) {
+        const installmentData = await installmentRes.json();
+        if (installmentData.paymentBookUrl) {
+          return res.status(200).json({ url: installmentData.paymentBookUrl });
+        }
+      }
+    }
+
+    // 4. Se não for parcelamento ou não tiver carnê, retorna o link do boleto individual
+    if (paymentData.bankSlipUrl) {
+      return res.status(200).json({ url: paymentData.bankSlipUrl });
+    }
+
+    return res.status(404).json({ error: 'Link do carnê ou boleto não disponível.' });
+
+  } catch (error) {
+    console.error('Erro ao buscar carnê:', error);
+    return res.status(500).json({ error: 'Erro interno ao processar o carnê.' });
   }
 });
 

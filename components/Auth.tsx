@@ -4,7 +4,7 @@ import { BookOpen, User as UserIcon, Lock, ArrowRight, Loader2, Shield } from 'l
 
 interface AuthProps {
   data: SchoolData;
-  onLogin: () => void;
+  onLogin: (user: User) => void;
   onUpdateUsers: (newUsers: User[]) => void;
 }
 
@@ -16,6 +16,7 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
   
   const [formData, setFormData] = useState({
     name: '',
+    displayName: '',
     password: '',
     newPassword: '',
     cpf: ''
@@ -53,13 +54,19 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
           setError('Este usuário não possui CPF cadastrado. Entre em contato com o suporte.');
         } else if (!formData.newPassword) {
           setError('Digite a nova senha.');
+        } else if (!formData.displayName) {
+          setError('O Nome Completo é obrigatório.');
         } else {
           const updatedUsers = [...usersList];
-          updatedUsers[userIndex] = { ...updatedUsers[userIndex], password: formData.newPassword.trim() };
+          updatedUsers[userIndex] = { 
+            ...updatedUsers[userIndex], 
+            password: formData.newPassword.trim(),
+            displayName: formData.displayName.trim()
+          };
           onUpdateUsers(updatedUsers);
-          setSuccess('Senha redefinida com sucesso! Faça login.');
+          setSuccess('Dados atualizados com sucesso! Faça login.');
           setIsRecovering(false);
-          setFormData({ name: '', password: '', newPassword: '', cpf: '' });
+          setFormData({ name: '', displayName: '', password: '', newPassword: '', cpf: '' });
         }
       } else {
         setError('Usuário não encontrado.');
@@ -72,7 +79,7 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
       );
       
       if (user) {
-        onLogin();
+        onLogin(user);
       } else {
         setError('Usuário ou senha inválidos.');
       }
@@ -113,20 +120,33 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
             </div>
 
             {isRecovering && (
-              <div className="relative group">
-                <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
-                <input 
-                  type="text" 
-                  placeholder="Confirme seu CPF" 
-                  required
-                  className={inputClass}
-                  value={formData.cpf}
-                  onChange={e => {
-                    const val = e.target.value.replace(/\D/g, '').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})/, '$1-$2').slice(0, 14);
-                    setFormData({...formData, cpf: val});
-                  }}
-                />
-              </div>
+              <>
+                <div className="relative group">
+                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Nome Completo (Ex: João Silva)" 
+                    required
+                    className={inputClass}
+                    value={formData.displayName}
+                    onChange={e => setFormData({...formData, displayName: e.target.value})}
+                  />
+                </div>
+                <div className="relative group">
+                  <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Confirme seu CPF" 
+                    required
+                    className={inputClass}
+                    value={formData.cpf}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, '').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})/, '$1-$2').slice(0, 14);
+                      setFormData({...formData, cpf: val});
+                    }}
+                  />
+                </div>
+              </>
             )}
 
             {!isRecovering ? (
@@ -190,7 +210,7 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
                 setIsRecovering(!isRecovering);
                 setError('');
                 setSuccess('');
-                setFormData({ name: '', password: '', newPassword: '', cpf: '' });
+                setFormData({ name: '', displayName: '', password: '', newPassword: '', cpf: '' });
               }}
               className="text-sm font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
             >

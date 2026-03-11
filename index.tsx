@@ -17,12 +17,14 @@ import ReportCard from './components/ReportCard';
 import Auth from './components/Auth';
 import UserManagement from './components/UserManagement';
 import Handouts from './components/Handouts';
+import Employees from './components/Employees';
 import { Cloud, CloudOff, RefreshCw, AlertCircle } from 'lucide-react';
 import { isSupabaseConfigured } from './services/supabase';
 import { DialogProvider } from './DialogContext';
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<View>(View.Dashboard);
   // Initial load from LocalStorage for speed (fallback), then IDB
   const [data, setData] = useState<SchoolData>(dbService.getData());
@@ -143,6 +145,8 @@ const App = () => {
         return <ReportCard data={data} updateData={updateData} />;
       case View.Handouts:
         return <Handouts data={data} updateData={updateData} />;
+      case View.Employees:
+        return <Employees data={data} updateData={updateData} />;
       case View.Users:
         return <UserManagement data={data} updateData={updateData} />;
       case View.Settings:
@@ -153,12 +157,15 @@ const App = () => {
   };
 
   if (!isAuthenticated) {
-    return <Auth data={data} onLogin={() => setIsAuthenticated(true)} onUpdateUsers={handleUpdateUsers} />;
+    return <Auth data={data} onLogin={(user) => {
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+    }} onUpdateUsers={handleUpdateUsers} />;
   }
 
   return (
     <div className="flex min-h-screen bg-slate-50 relative">
-      <Sidebar currentView={currentView} setView={setCurrentView} />
+      <Sidebar currentView={currentView} setView={setCurrentView} user={currentUser} />
       <main className="flex-1 w-full overflow-y-auto max-h-screen pt-16 md:pt-0 relative">
         {/* Sync Indicator - Green Strip on the Right */}
         {syncStatus === 'syncing' && (

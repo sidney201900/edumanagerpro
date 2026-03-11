@@ -94,22 +94,142 @@ export const addHeader = async (doc: any, schoolData: SchoolData) => {
     await addImageProportional(doc, profile.logo, 20, 10, 25, 25);
   }
 
-  doc.setFontSize(14);
-  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(12);
+  doc.setTextColor(0);
   doc.setFont('helvetica', 'bold');
   doc.text(profile.name || 'EduManager School', 50, 18);
   
   doc.setFontSize(8);
-  doc.setTextColor(100);
+  doc.setTextColor(0);
   doc.setFont('helvetica', 'normal');
   doc.text(`CNPJ: ${profile.cnpj || 'Não informado'}`, 50, 23);
   doc.text(profile.address || '', 50, 27);
   doc.text(`${profile.phone || ''} ${profile.email ? '| ' + profile.email : ''}`, 50, 31);
   
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.5);
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.1);
   doc.line(20, 38, 190, 38);
   return 45;
+};
+
+/**
+ * Helper to calculate age and get signer info
+ */
+const getSignerInfo = (student: Student) => {
+  if (!student.birthDate) {
+    return {
+      name: student.guardianName || student.name,
+      cpf: student.guardianCpf || student.cpf,
+      label: student.guardianName ? 'ASSINATURA DO RESPONSÁVEL' : 'ASSINATURA DO ALUNO'
+    };
+  }
+
+  const today = new Date();
+  const birth = new Date(student.birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+
+  if (age >= 18) {
+    return {
+      name: student.name,
+      cpf: student.cpf,
+      label: 'ASSINATURA DO ALUNO'
+    };
+  } else {
+    return {
+      name: student.guardianName || 'NÃO INFORMADO',
+      cpf: student.guardianCpf || '---',
+      label: 'ASSINATURA DO RESPONSÁVEL'
+    };
+  }
+};
+
+/**
+ * Helper to add page numbers to footer
+ */
+const addPageNumbers = (doc: any) => {
+  const pageCount = doc.internal.getNumberOfPages();
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(0);
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.text(
+      `Página ${i} de ${pageCount}`, 
+      doc.internal.pageSize.width / 2, 
+      doc.internal.pageSize.height - 10, 
+      { align: 'center' }
+    );
+  }
+};
+
+/**
+ * Helper to draw justified text with paragraph support
+ */
+const drawJustifiedText = async (doc: any, text: string, x: number, y: number, maxWidth: number, lineHeight: number, schoolData: SchoolData) => {
+  const paragraphs = text.split('\n').filter(p => p.trim() !== '');
+  let currentY = y;
+  const margin = x;
+  const pageHeight = doc.internal.pageSize.height;
+
+  for (const p of paragraphs) {
+    const isClause = p.toUpperCase().startsWith('CLÁUSULA') || p.toUpperCase().startsWith('CLAUSULA');
+    
+    // Check for page break before paragraph
+    if (currentY > pageHeight - 30) {
+      doc.addPage();
+      await addHeader(doc, schoolData);
+      currentY = 50;
+    }
+
+    doc.setFont('helvetica', isClause ? 'bold' : 'normal');
+    doc.setFontSize(9);
+
+    // Indent for non-clause paragraphs
+    const startX = isClause ? margin : margin + 10;
+    const currentMaxWidth = isClause ? maxWidth : maxWidth - 10;
+
+    const lines = doc.splitTextToSize(p, currentMaxWidth);
+    
+    for (let i = 0; i < lines.length; i++) {
+      // Check for page break before line
+      if (currentY > pageHeight - 20) {
+        doc.addPage();
+        await addHeader(doc, schoolData);
+        currentY = 50;
+        doc.setFont('helvetica', isClause ? 'bold' : 'normal');
+      }
+
+      const line = lines[i];
+      const isLastLine = i === lines.length - 1;
+
+      if (isClause || isLastLine || line.trim().length < (currentMaxWidth / 4)) {
+        doc.text(line, startX, currentY);
+      } else {
+        // Justify line
+        const words = line.trim().split(/\s+/);
+        if (words.length > 1) {
+          const totalWordsWidth = words.reduce((sum: number, word: string) => sum + doc.getTextWidth(word), 0);
+          const totalSpacing = currentMaxWidth - totalWordsWidth;
+          const spacingPerWord = totalSpacing / (words.length - 1);
+          
+          let currentX = startX;
+          for (let j = 0; j < words.length; j++) {
+            doc.text(words[j], currentX, currentY);
+            currentX += doc.getTextWidth(words[j]) + spacingPerWord;
+          }
+        } else {
+          doc.text(line, startX, currentY);
+        }
+      }
+      currentY += lineHeight;
+    }
+    currentY += 4; // Space between paragraphs
+  }
+  return currentY;
 };
 
 export const pdfService = {
@@ -118,145 +238,130 @@ export const pdfService = {
     const startY = await addHeader(doc, schoolData);
     const cls = schoolData.classes.find(c => c.id === student.classId);
     const course = schoolData.courses.find(c => c.id === cls?.courseId);
-
-    // Title - Professional Vector Text
-    doc.setFontSize(16);
-    doc.setTextColor(30, 41, 59);
-    doc.setFont('helvetica', 'bold');
-    doc.text('FICHA DE MATRÍCULA E REGISTRO ACADÊMICO', 105, startY + 12, { align: 'center' });
     
-    // Photo Positioning - Standard 3x4cm (30mm x 40mm)
-    const photoX = 160;
-    const photoY = startY + 20;
+    // Title and Date (Centered)
+    doc.setFontSize(16);
+    doc.setTextColor(0);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Ficha de Matrícula', 105, startY + 10, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 105, startY + 16, { align: 'center' });
+    
+    // Photo Positioning - Top Right (Standard 3x4cm = 30x40mm)
+    const photoX = 155;
+    const photoY = startY + 25;
+    const photoW = 30;
+    const photoH = 40;
     
     if (student.photo) {
-      const imgResult = await addStudentPhoto3x4(doc, student.photo, photoX, photoY);
-      if (!imgResult) {
-        doc.setDrawColor(200);
-        doc.setLineWidth(0.1);
-        doc.rect(photoX, photoY, 30, 40);
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text('FOTO 3X4', photoX + 15, photoY + 22, { align: 'center' });
-      } else {
-        // Border around photo
-        doc.setDrawColor(30, 41, 59);
-        doc.setLineWidth(0.2);
-        doc.rect(photoX, photoY, 30, 40);
-      }
-    } else {
-      doc.setDrawColor(200);
-      doc.setLineWidth(0.1);
-      doc.rect(photoX, photoY, 30, 40);
-      doc.setFontSize(8);
+      await addStudentPhoto3x4(doc, student.photo, photoX, photoY);
+    }
+    
+    // Border around photo area
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.1);
+    doc.rect(photoX, photoY, photoW, photoH);
+    if (!student.photo) {
+      doc.setFontSize(7);
       doc.setTextColor(150);
-      doc.text('FOTO 3X4', photoX + 15, photoY + 22, { align: 'center' });
+      doc.text('FOTO 3X4', photoX + 15, photoY + 20, { align: 'center' });
     }
 
-    let currentY = startY + 25;
+    let currentY = startY + 30;
+    const labelX = 20;
 
-    // Section: Dados Pessoais
-    doc.setFontSize(10);
-    doc.setTextColor(79, 70, 229);
+    // 1. Dados do Aluno
+    doc.setFontSize(12);
+    doc.setTextColor(0);
     doc.setFont('helvetica', 'bold');
-    doc.text('1. DADOS IDENTIFICADORES DO DISCENTE', 20, currentY);
-    doc.setDrawColor(79, 70, 229);
-    doc.setLineWidth(0.3);
-    doc.line(20, currentY + 2, 155, currentY + 2);
-
-    currentY += 10;
-    doc.setFontSize(9);
-    doc.setTextColor(30, 41, 59);
+    doc.text('Dados do Aluno', labelX, currentY);
     
-    const drawField = (label: string, value: string, x: number, y: number, labelW: number) => {
-      doc.setFont('helvetica', 'bold');
-      doc.text(label, x, y);
+    currentY += 8;
+    doc.setFontSize(10);
+    
+    const drawField = (label: string, value: string, y: number) => {
       doc.setFont('helvetica', 'normal');
-      doc.text(value || '---', x + labelW, y);
+      doc.text(`${label}: ${value || '-'}`, labelX, y);
+      return y + 6;
     };
 
-    drawField('NOME COMPLETO:', student.name, 20, currentY, 35);
-    currentY += 7;
-    drawField('CPF:', student.cpf, 20, currentY, 35);
-    currentY += 7;
+    currentY = drawField('Nome', student.name, currentY);
+    currentY = drawField('CPF', student.cpf, currentY);
+    currentY = drawField('RG', student.rg, currentY);
+    currentY = drawField('Data de Nascimento', student.birthDate ? new Date(student.birthDate).toLocaleDateString('pt-BR') : '', currentY);
+    currentY = drawField('Email', student.email, currentY);
+    currentY = drawField('Telefone', student.phone, currentY);
     
-    const rgIssue = student.rgIssueDate ? ` (Exp: ${new Date(student.rgIssueDate).toLocaleDateString('pt-BR')})` : '';
-    drawField('RG:', `${student.rg || ''}${rgIssue}`, 20, currentY, 35);
-    currentY += 7;
+    currentY += 4;
 
-    const birth = new Date(student.birthDate);
-    const ageStr = student.birthDate ? ` (${new Date().getFullYear() - birth.getFullYear()} anos)` : '';
-    drawField('NASCIMENTO:', (student.birthDate ? birth.toLocaleDateString('pt-BR') : '---') + ageStr, 20, currentY, 35);
-    currentY += 7;
-    
-    drawField('TELEFONE:', student.phone, 20, currentY, 35);
-    currentY += 7;
-    drawField('E-MAIL:', student.email, 20, currentY, 35);
-
-    // Conditional Section: Responsável
-    if (student.guardianName) {
-      currentY += 12;
-      doc.setFontSize(10);
-      doc.setTextColor(79, 70, 229);
-      doc.setFont('helvetica', 'bold');
-      doc.text('1.1 DADOS DO RESPONSÁVEL LEGAL', 20, currentY);
-      doc.line(20, currentY + 2, 190, currentY + 2);
-
-      currentY += 10;
-      doc.setFontSize(9);
-      doc.setTextColor(30, 41, 59);
-      drawField('NOME:', student.guardianName, 20, currentY, 35);
-      currentY += 7;
-      drawField('CPF:', student.guardianCpf, 20, currentY, 35);
-    }
-
-    // Section: Informações do Curso
-    currentY += 15;
-    doc.setFontSize(10);
-    doc.setTextColor(79, 70, 229);
+    // 2. Endereço
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text('2. INFORMAÇÕES ACADÊMICAS E VÍNCULO', 20, currentY);
-    doc.line(20, currentY + 2, 190, currentY + 2);
+    doc.text('Endereço', labelX, currentY);
+    currentY += 6;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${student.addressStreet || ''}${student.addressNumber ? `, ${student.addressNumber}` : ''} - ${student.addressNeighborhood || ''}`, labelX, currentY);
+    currentY += 6;
+    doc.text(`${student.addressCity || ''} - ${student.addressState || ''} CEP: ${student.addressZip || ''}`, labelX, currentY);
+    
+    currentY += 10;
+
+    // 3. Dados do Curso
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Dados do Curso', labelX, currentY);
+    currentY += 8;
+    doc.setFontSize(10);
+    currentY = drawField('Curso', course?.name || 'Não vinculado', currentY);
+    currentY = drawField('Turma', cls?.name || 'Não atribuída', currentY);
+    currentY = drawField('Horário', cls?.schedule || 'N/A', currentY);
+    currentY = drawField('Professor', cls?.teacher || 'N/A', currentY);
+    currentY = drawField('Data Matrícula', new Date(student.registrationDate).toLocaleDateString('pt-BR'), currentY);
 
     currentY += 10;
-    doc.setFontSize(9);
-    doc.setTextColor(30, 41, 59);
-    drawField('CURSO:', course?.name || 'Não vinculado', 20, currentY, 35);
-    currentY += 7;
-    drawField('TURMA:', cls?.name || 'Não atribuída', 20, currentY, 35);
-    currentY += 7;
-    drawField('PROFESSOR:', cls?.teacher || 'N/A', 20, currentY, 35);
-    currentY += 7;
-    drawField('HORÁRIO:', cls?.schedule || 'N/A', 20, currentY, 35);
 
-    // Section: Status e Registro
-    currentY += 15;
-    doc.setFontSize(10);
-    doc.setTextColor(79, 70, 229);
+    // 4. Termos e Condições
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text('3. REGISTRO DE MATRÍCULA', 20, currentY);
-    doc.line(20, currentY + 2, 190, currentY + 2);
-
-    currentY += 10;
+    doc.text('Termos e Condições', labelX, currentY);
+    
+    currentY += 8;
     doc.setFontSize(9);
-    doc.setTextColor(30, 41, 59);
-    drawField('DATA DE MATRÍCULA:', new Date(student.registrationDate).toLocaleDateString('pt-BR'), 20, currentY, 45);
-    currentY += 7;
-    drawField('SITUAÇÃO ATUAL:', student.status === 'active' ? 'ATIVO / REGULAR' : 'INATIVO / TRANCADO', 20, currentY, 45);
+    doc.setFont('helvetica', 'normal');
+    const termsText = "Declaro que as informações acima são verdadeiras e assumo a responsabilidade pelo pagamento das mensalidades escolares conforme contrato de prestação de serviços educacionais.";
+    const splitTerms = doc.splitTextToSize(termsText, 170);
+    doc.text(splitTerms, labelX, currentY);
 
     // Footer - Signatures
     const pageHeight = doc.internal.pageSize.height;
-    doc.setFontSize(8);
-    doc.setTextColor(150);
-    doc.text('Documento gerado eletronicamente em: ' + new Date().toLocaleString('pt-BR'), 105, pageHeight - 15, { align: 'center' });
-    
-    doc.setDrawColor(30, 41, 59);
-    doc.setLineWidth(0.2);
-    doc.line(25, pageHeight - 45, 90, pageHeight - 45);
-    doc.text(student.guardianName ? 'ASSINATURA DO RESPONSÁVEL' : 'ASSINATURA DO ALUNO', 57.5, pageHeight - 40, { align: 'center' });
+    const signer = getSignerInfo(student);
 
-    doc.line(120, pageHeight - 45, 185, pageHeight - 45);
-    doc.text('COORDENAÇÃO ACADÊMICA', 152.5, pageHeight - 40, { align: 'center' });
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.2);
+    
+    // Signer Signature
+    const sigY = pageHeight - 45;
+    doc.line(20, sigY, 90, sigY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(signer.name.toUpperCase(), 55, sigY + 5, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`CPF: ${signer.cpf || '---'}`, 55, sigY + 9, { align: 'center' });
+    doc.text(signer.label, 55, sigY + 13, { align: 'center' });
+
+    // School Signature
+    doc.line(120, sigY, 190, sigY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(schoolData.profile.name.toUpperCase(), 155, sigY + 5, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`CNPJ: ${schoolData.profile.cnpj || '---'}`, 155, sigY + 9, { align: 'center' });
+    doc.text('Assinatura da Escola', 155, sigY + 13, { align: 'center' });
 
     doc.save(`ficha_matricula_${student.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   },
@@ -268,11 +373,11 @@ export const pdfService = {
     const contracts = schoolData.contracts.filter(c => c.studentId === student.id);
 
     doc.setFontSize(16);
-    doc.setTextColor(79, 70, 229);
+    doc.setTextColor(0);
     doc.text(`Histórico Acadêmico e Financeiro: ${student.name}`, 105, startY + 5, { align: 'center' });
 
     doc.setFontSize(12);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.text('Contratos Ativos', 20, startY + 20);
     
     doc.autoTable({
@@ -286,7 +391,7 @@ export const pdfService = {
         c.title,
         new Date(c.createdAt).toLocaleDateString('pt-BR')
       ]),
-      headStyles: { fillColor: [79, 70, 229] }
+      headStyles: { fillColor: [0, 0, 0] }
     });
 
     const nextY = (doc as any).lastAutoTable.finalY + 15;
@@ -306,7 +411,7 @@ export const pdfService = {
         `R$ ${p.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
         p.status === 'paid' ? 'Pago' : p.status === 'overdue' ? 'Atrasado' : 'Pendente'
       ]),
-      headStyles: { fillColor: [30, 41, 59] }
+      headStyles: { fillColor: [0, 0, 0] }
     });
 
     doc.save(`historico_${student.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
@@ -315,7 +420,7 @@ export const pdfService = {
   generatePaymentReceiptPDF: async (payment: Payment, student: Student, schoolData: SchoolData) => {
     const doc = new jsPDF() as any;
     
-    doc.setDrawColor(79, 70, 229);
+    doc.setDrawColor(0);
     doc.setLineWidth(0.5);
     doc.rect(10, 10, 190, 140); // Border
 
@@ -324,22 +429,22 @@ export const pdfService = {
        await addImageProportional(doc, profile.logo, 20, 15, 20, 20);
     }
     doc.setFontSize(12);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.text(profile.name, 45, 18);
     doc.setFontSize(8);
     doc.text(`CNPJ: ${profile.cnpj || '---'}`, 45, 22);
     doc.text(profile.address || '', 45, 26);
 
     doc.setFontSize(16);
-    doc.setTextColor(79, 70, 229);
+    doc.setTextColor(0);
     doc.text('RECIBO DE PAGAMENTO', 105, 45, { align: 'center' });
 
     doc.setFontSize(9);
-    doc.setTextColor(100);
+    doc.setTextColor(0);
     doc.text(`Nº do Documento: ${payment.id.substring(0, 8).toUpperCase()}`, 150, 55);
 
     doc.setFontSize(11);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.text(`Recebemos de: ${student.name}`, 20, 70);
     doc.text(`CPF: ${student.cpf || '---'}`, 20, 76);
     doc.text(`A quantia de: R$ ${payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 20, 85);
@@ -352,11 +457,11 @@ export const pdfService = {
     
     if (payment.status === 'paid' && payment.paidDate) {
       doc.setFontSize(12);
-      doc.setTextColor(16, 185, 129);
+      doc.setTextColor(0);
       doc.text(`PAGO EM: ${payment.paidDate}`, 105, 120, { align: 'center' });
     }
 
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.setFontSize(9);
     doc.text('_________________________________', 105, 140, { align: 'center' });
     doc.text('Assinatura / Carimbo', 105, 145, { align: 'center' });
@@ -371,60 +476,65 @@ export const pdfService = {
     doc.setFontSize(16);
     doc.setTextColor(30, 41, 59);
     doc.setFont('helvetica', 'bold');
-    doc.text(contract.title, 105, currentY + 10, { align: 'center' });
+    doc.text(contract.title.toUpperCase(), 105, currentY + 10, { align: 'center' });
     
     currentY += 25;
-    doc.setFontSize(9);
-    doc.setTextColor(100);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Data de Emissão: ${new Date(contract.createdAt).toLocaleDateString('pt-BR')}`, 20, currentY);
-    doc.text(`Contratante: ${student.name} (CPF: ${student.cpf || '---'})`, 20, currentY + 5);
-    
-    // Use autoTable for the content to handle pagination and performance perfectly
-    // Split content by newlines to create separate rows, which helps autoTable paginate correctly
-    const paragraphs = contract.content.split('\n').filter(p => p.trim() !== '');
-    const bodyData = paragraphs.map(p => [p]);
-
-    doc.autoTable({
-      startY: currentY + 15,
-      body: bodyData,
-      theme: 'plain',
-      styles: {
-        fontSize: 10,
-        cellPadding: { top: 2, bottom: 2, left: 0, right: 0 },
-        overflow: 'linebreak',
-        textColor: [30, 41, 59],
-        font: 'helvetica',
-        fontStyle: 'normal'
-      },
-      margin: { top: 45, bottom: 60, left: 20, right: 20 },
-      didDrawPage: async (data: any) => {
-        if (data.pageNumber > 1) await addHeader(doc, schoolData);
-      }
-    });
-
-    let finalY = (doc as any).lastAutoTable.finalY + 20;
-    const pageHeight = doc.internal.pageSize.height;
-
-    // Check if signatures fit on the current page
-    if (finalY > pageHeight - 40) {
-      doc.addPage();
-      await addHeader(doc, schoolData);
-      finalY = 60;
-    }
-
     doc.setFontSize(10);
     doc.setTextColor(30, 41, 59);
     doc.setFont('helvetica', 'normal');
-    doc.text('_________________________________', 105, finalY, { align: 'center' });
     
+    // Contract Header Info
+    doc.text(`DATA DE EMISSÃO: ${new Date(contract.createdAt).toLocaleDateString('pt-BR')}`, 20, currentY);
+    doc.text(`CONTRATANTE: ${student.name.toUpperCase()}`, 20, currentY + 6);
+    doc.text(`CPF: ${student.cpf || '---'}`, 20, currentY + 12);
+    
+    currentY += 25;
+
+    // Draw Justified Content with Pagination
+    const margin = 20;
+    const pageWidth = doc.internal.pageSize.width;
+    const maxWidth = pageWidth - (margin * 2);
+    
+    currentY = await drawJustifiedText(doc, contract.content, margin, currentY, maxWidth, 6, schoolData);
+
+    // Signatures
+    const pageHeight = doc.internal.pageSize.height;
+    const signer = getSignerInfo(student);
+
+    // Check if signatures fit on current page
+    if (currentY > pageHeight - 60) {
+      doc.addPage();
+      await addHeader(doc, schoolData);
+      currentY = 60;
+    } else {
+      currentY += 20;
+    }
+
+    doc.setDrawColor(30, 41, 59);
+    doc.setLineWidth(0.2);
+    
+    // Signer Signature
+    doc.line(25, currentY, 90, currentY);
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    const signatureLabel = student.guardianName 
-      ? `ASSINATURA DO RESPONSÁVEL: ${student.guardianName}`
-      : `ASSINATURA DO ALUNO: ${student.name}`;
-      
-    doc.text(signatureLabel, 105, finalY + 5, { align: 'center' });
-    
+    doc.text(signer.name.toUpperCase(), 57.5, currentY + 5, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`CPF: ${signer.cpf || '---'}`, 57.5, currentY + 9, { align: 'center' });
+    doc.text(signer.label, 57.5, currentY + 13, { align: 'center' });
+
+    // School Signature
+    doc.line(120, currentY, 185, currentY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(schoolData.profile.name.toUpperCase(), 152.5, currentY + 5, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('CONTRATADA / INSTITUIÇÃO', 152.5, currentY + 9, { align: 'center' });
+
+    // Add Page Numbers to all pages
+    addPageNumbers(doc);
+
     doc.save(`contrato_${contract.title.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   },
 
@@ -435,11 +545,11 @@ export const pdfService = {
     const students = schoolData.students.filter(s => s.classId === cls.id);
 
     doc.setFontSize(16);
-    doc.setTextColor(79, 70, 229);
+    doc.setTextColor(0);
     doc.text(`Relatório de Turma: ${cls.name}`, 105, startY + 5, { align: 'center' });
     
     doc.setFontSize(10);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.text(`Curso: ${course?.name || 'N/A'}`, 20, startY + 15);
     doc.text(`Professor: ${cls.teacher}`, 20, startY + 22);
     doc.text(`Horário: ${cls.schedule}`, 20, startY + 29);
@@ -457,7 +567,7 @@ export const pdfService = {
         s.phone,
         s.status === 'active' ? 'Ativo' : 'Inativo'
       ]),
-      headStyles: { fillColor: [79, 70, 229] }
+      headStyles: { fillColor: [0, 0, 0] }
     });
 
     doc.save(`turma_${cls.name.replace(/\s+/g, '_').toLowerCase()}.pdf`);
@@ -468,7 +578,7 @@ export const pdfService = {
     const startY = await addHeader(doc, schoolData);
 
     doc.setFontSize(16);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.text('Relatório Geral de Alunos', 105, startY + 5, { align: 'center' });
 
     doc.autoTable({
@@ -488,7 +598,7 @@ export const pdfService = {
           s.status === 'active' ? 'Ativo' : 'Inativo'
         ];
       }),
-      headStyles: { fillColor: [30, 41, 59] }
+      headStyles: { fillColor: [0, 0, 0] }
     });
 
     doc.save(`lista_alunos_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -499,7 +609,7 @@ export const pdfService = {
     const startY = await addHeader(doc, schoolData);
     
     doc.setFontSize(18);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(0);
     doc.text('Relatório Consolidado', 105, startY + 5, { align: 'center' });
     
     doc.setFontSize(12);
@@ -522,7 +632,7 @@ export const pdfService = {
         `R$ ${schoolData.payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toFixed(2)}`,
         `R$ ${schoolData.payments.filter(p => p.status !== 'paid').reduce((sum, p) => sum + p.amount, 0).toFixed(2)}`
       ]],
-      headStyles: { fillColor: [30, 41, 59] }
+      headStyles: { fillColor: [0, 0, 0] }
     });
 
     doc.save(`relatorio_geral_${new Date().toISOString().split('T')[0]}.pdf`);

@@ -1,28 +1,31 @@
--- Create the table for storing the entire application state as a JSON blob
-create table if not exists school_data (
-  id bigint primary key,
-  data jsonb not null default '{}'::jsonb,
-  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+-- SQL Schema for EduManager Employee Module and User Enhancements
+
+-- 1. Employee Categories Table
+CREATE TABLE IF NOT EXISTS categorias_funcionarios (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Insert the initial row (id=1) if it doesn't exist so the app has something to fetch/update
-insert into school_data (id, data)
-values (1, '{}'::jsonb)
-on conflict (id) do nothing;
+-- 2. Employees Table
+CREATE TABLE IF NOT EXISTS funcionarios (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    nome TEXT NOT NULL,
+    cpf TEXT UNIQUE NOT NULL,
+    telefone TEXT,
+    email TEXT,
+    data_admissao DATE,
+    categoria_id UUID REFERENCES categorias_funcionarios(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Enable Row Level Security (RLS)
-alter table school_data enable row level security;
+-- 3. Storage Bucket for Profile Pictures
+-- Note: You need to create the bucket 'edumanager-assets' in the Supabase Dashboard
+-- and set its policy to public or authenticated as needed.
 
--- Create a policy that allows anyone to read/write (for development/demo purposes)
--- In a real production app, you would restrict this to authenticated users
-create policy "Enable read access for all users"
-on school_data for select
-using (true);
+-- Example Policies for Storage:
+-- CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id = 'edumanager-assets');
+-- CREATE POLICY "Authenticated Upload" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'edumanager-assets' AND auth.role() = 'authenticated');
 
-create policy "Enable insert access for all users"
-on school_data for insert
-with check (true);
-
-create policy "Enable update access for all users"
-on school_data for update
-using (true);
+-- 4. Update school_data table if needed (EduManager uses a single JSON blob for most data)
+-- The application logic handles the JSON structure updates automatically.

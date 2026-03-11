@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { View } from '../types';
 import { 
   LayoutDashboard, 
   Users, 
@@ -19,16 +18,20 @@ import {
   FileText,
   Cloud,
   CloudOff,
-  Library
+  Library,
+  Briefcase,
+  LogOut
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../services/supabase';
+import { View, User } from '../types';
 
 interface SidebarProps {
   currentView: View;
   setView: (view: View) => void;
+  user: User | null;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setView }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, user }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -44,6 +47,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView }) => {
     { id: View.Attendance, icon: Camera, label: 'Frequência' },
     { id: View.AttendanceQuery, icon: ListChecks, label: 'Registro de Frequência' },
     { id: View.Handouts, icon: Library, label: 'Apostilas' },
+    { id: View.Employees, icon: Briefcase, label: 'Funcionários' },
     { id: View.Users, icon: Shield, label: 'Usuários' },
     { id: View.Settings, icon: Settings, label: 'Configurações' },
   ];
@@ -118,14 +122,32 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView }) => {
         
         <div className="p-4 border-t border-slate-100 space-y-3">
           <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : 'px-4 py-2'}`}>
-            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
-              AD
-            </div>
-            {!isCollapsed && (
-              <div className="overflow-hidden">
-                <p className="text-xs font-bold text-slate-900 truncate">Administrador</p>
-                <p className="text-[10px] text-slate-500 truncate">Escola de Informática</p>
+            {user?.photoURL ? (
+              <img 
+                src={user.photoURL} 
+                alt={user.displayName || user.name} 
+                className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
+                {user?.name?.substring(0, 2).toUpperCase() || 'AD'}
               </div>
+            )}
+            {!isCollapsed && (
+              <div className="overflow-hidden flex-1">
+                <p className="text-xs font-bold text-slate-900 truncate">{user?.displayName || user?.name || 'Administrador'}</p>
+                <p className="text-[10px] text-slate-500 truncate uppercase tracking-tighter">{user?.role === 'admin' ? 'Administrador' : 'Usuário'}</p>
+              </div>
+            )}
+            {!isCollapsed && (
+              <button 
+                onClick={() => window.location.reload()}
+                className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg transition-all"
+                title="Sair"
+              >
+                <LogOut size={16} />
+              </button>
             )}
           </div>
           

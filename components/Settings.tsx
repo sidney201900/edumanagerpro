@@ -21,7 +21,6 @@ const Settings: React.FC<SettingsProps> = ({ data, updateData, setData }) => {
     cnpj: data.profile.cnpj || '',
     phone: data.profile.phone || '',
     email: data.profile.email || '',
-    contractTemplate: data.profile.contractTemplate || '',
     logo: data.profile.logo || ''
   });
   const [isSyncing, setIsSyncing] = useState(false);
@@ -196,59 +195,15 @@ using (true);`;
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-xl space-y-6">
-            <div className="flex items-center gap-3 text-indigo-600">
-              <div className="p-3 bg-indigo-50 rounded-lg">
-                <FileText size={24} />
-              </div>
-              <h3 className="text-xl font-black text-slate-800">Modelo Global de Contrato</h3>
+            <div className="pt-4">
+              <button 
+                onClick={saveProfile}
+                className="w-full py-4 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text-sm"
+              >
+                Salvar Perfil da Instituição
+              </button>
             </div>
-            
-            <div className="bg-amber-50 border border-amber-100 p-4 rounded-lg flex gap-3">
-              <Info className="text-amber-500 shrink-0" size={20} />
-              <div className="text-xs text-amber-800 space-y-2">
-                <p className="font-bold">Dica de Placeholders (Tags que serão substituídas automaticamente):</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <p className="font-bold text-[10px] uppercase text-amber-900/60 mb-1">Aluno</p>
-                    <p><code className="bg-white px-1 rounded">{"{{aluno}}"}</code>, <code className="bg-white px-1 rounded">{"{{aluno_cpf}}"}</code>, <code className="bg-white px-1 rounded">{"{{aluno_rg}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{aluno_nascimento}}"}</code>, <code className="bg-white px-1 rounded">{"{{aluno_email}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{aluno_telefone}}"}</code>, <code className="bg-white px-1 rounded">{"{{aluno_cep}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{aluno_endereco}}"}</code>, <code className="bg-white px-1 rounded">{"{{aluno_bairro}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{aluno_cidade}}"}</code>, <code className="bg-white px-1 rounded">{"{{aluno_estado}}"}</code></p>
-                  </div>
-                  <div>
-                    <p className="font-bold text-[10px] uppercase text-amber-900/60 mb-1">Responsável</p>
-                    <p><code className="bg-white px-1 rounded">{"{{responsavel_nome}}"}</code>, <code className="bg-white px-1 rounded">{"{{responsavel_cpf}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{responsavel_nascimento}}"}</code></p>
-                    
-                    <p className="font-bold text-[10px] uppercase text-amber-900/60 mt-2 mb-1">Curso e Turma</p>
-                    <p><code className="bg-white px-1 rounded">{"{{curso}}"}</code>, <code className="bg-white px-1 rounded">{"{{mensalidade}}"}</code>, <code className="bg-white px-1 rounded">{"{{duracao}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{curso_taxa_matricula}}"}</code>, <code className="bg-white px-1 rounded">{"{{turma_nome}}"}</code></p>
-                    <p><code className="bg-white px-1 rounded">{"{{turma_professor}}"}</code>, <code className="bg-white px-1 rounded">{"{{turma_horario}}"}</code></p>
-                    
-                    <p className="font-bold text-[10px] uppercase text-amber-900/60 mt-2 mb-1">Escola</p>
-                    <p><code className="bg-white px-1 rounded">{"{{escola}}"}</code>, <code className="bg-white px-1 rounded">{"{{cnpj_escola}}"}</code>, <code className="bg-white px-1 rounded">{"{{data}}"}</code></p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <textarea 
-              className={`${inputClass} h-64 font-serif leading-relaxed resize-none p-6 bg-white text-black`}
-              value={profile.contractTemplate}
-              onChange={e => setProfile({...profile, contractTemplate: e.target.value})}
-              placeholder="Digite o texto base das cláusulas do contrato..."
-            />
-            
-            <button 
-              onClick={saveProfile}
-              className="w-full py-4 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text-sm"
-            >
-              Salvar Todas as Configurações
-            </button>
           </div>
         </div>
 

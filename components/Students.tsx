@@ -4,7 +4,7 @@ import { dbService } from '../services/dbService';
 import { addHeader, pdfService } from '../services/pdfService';
 import { useDialog } from '../DialogContext';
 import { compressImage } from '../services/imageService';
-import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -25,6 +25,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   const [showDeleteModal, setShowDeleteModal] = useState<Student | null>(null);
   const [newClassId, setNewClassId] = useState('');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isFetchingCarne, setIsFetchingCarne] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState<Partial<Student>>({
@@ -49,6 +50,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     addressState: '',
     discount: 0,
     hasGuardian: false,
+    contractTemplateId: '',
     generateFee: false, // UI only
     generateContract: false // UI only
   } as any);
@@ -307,6 +309,25 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     }
   };
 
+  const handlePrintCarne = async (studentId: string) => {
+    setIsFetchingCarne(true);
+    try {
+      const response = await fetch(`/api/alunos/${studentId}/carne`);
+      const result = await response.json();
+
+      if (response.ok && result.url) {
+        window.open(result.url, '_blank');
+      } else {
+        showAlert('Erro', result.error || 'Não foi possível encontrar o carnê deste aluno.', 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar carnê:', error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    } finally {
+      setIsFetchingCarne(false);
+    }
+  };
+
   const checkCEP = async (cepValue?: string) => {
     const cep = (cepValue || formData.addressZip)?.replace(/\D/g, '');
     if (cep?.length === 8) {
@@ -491,6 +512,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
         addressState: '',
         discount: 0,
         hasGuardian: false,
+        contractTemplateId: '',
         generateFee: false,
         generateContract: false
       } as any);
@@ -601,11 +623,17 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
               nome: studentToSave.name,
               cpf: rawCpf,
               email: formData.email,
+              telefone: formData.phone?.replace(/\D/g, ''),
+              cep: formData.addressZip?.replace(/\D/g, ''),
+              endereco: formData.addressStreet,
+              numero: formData.addressNumber,
+              bairro: formData.addressNeighborhood,
               valor: feeAmount,
               vencimento: formattedDueDate,
               multa: 0,
               juros: 0,
-              parcelas: 1
+              parcelas: 1,
+              descricao: 'Taxa de Matrícula'
             })
           });
 
@@ -617,17 +645,19 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
               lastPayment.asaasPaymentId = result.paymentId;
             }
           } else {
-            throw new Error('Erro na resposta da API');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Erro na resposta da API');
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error('Erro ao gerar cobrança:', error);
-          showAlert('Atenção', 'Erro ao gerar boleto no Asaas, mas aluno foi salvo no sistema.', 'warning');
+          showAlert('Atenção', `Erro ao gerar boleto no Asaas: ${error.message}. O aluno foi salvo no sistema local.`, 'warning');
         }
       }
     }
 
     if ((formData as any).generateContract && course) {
-      let content = data.profile.contractTemplate || '';
+      const templateObj = data.contractTemplates?.find(t => t.id === formData.contractTemplateId);
+      let content = templateObj?.content || '';
       
       // Aluno
       content = content.replace(/{{aluno}}/g, studentToSave.name || '');
@@ -1262,7 +1292,21 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-2 mt-2">
+                    <div className="flex flex-col gap-4 mt-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Modelo de Contrato</label>
+                        <select 
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-medium text-sm"
+                          value={formData.contractTemplateId || ''} 
+                          onChange={e => setFormData({...formData, contractTemplateId: e.target.value})}
+                        >
+                          <option value="">Selecione um modelo...</option>
+                          {data.contractTemplates?.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div className="flex items-center gap-2">
                         <input 
                           type="checkbox" 
@@ -1360,7 +1404,16 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
       {/* Student History Modal */}
       {viewingStudentHistory && (
-        <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+        <>
+          {isFetchingCarne && (
+            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-slide-up">
+              <div className="bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-800">
+                <Loader2 size={20} className="animate-spin text-indigo-400" />
+                <span className="font-bold text-sm tracking-tight">Buscando carnê...</span>
+              </div>
+            </div>
+          )}
+          <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
           <div className={`bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
             {/* Blue Top Bar */}
             <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
@@ -1379,9 +1432,19 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                   <p className="text-slate-500 text-sm font-medium">Histórico Financeiro e Contratual</p>
                 </div>
               </div>
-              <button onClick={closeHistoryModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                <X size={24} className="text-slate-400" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => handlePrintCarne(viewingStudentHistory.id)}
+                  disabled={isFetchingCarne}
+                  className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg font-bold hover:bg-indigo-100 transition-all flex items-center gap-2 border border-indigo-100 disabled:opacity-50"
+                >
+                  {isFetchingCarne ? <Loader2 size={18} className="animate-spin" /> : <Printer size={18} />}
+                  Imprimir Carnê
+                </button>
+                <button onClick={closeHistoryModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <X size={24} className="text-slate-400" />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-8 space-y-8">
@@ -1482,7 +1545,8 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
             </div>
           </div>
         </div>
-      )}
+      </>
+    )}
     </div>
   );
 };
