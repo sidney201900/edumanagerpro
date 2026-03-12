@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { SchoolData, Payment, Student } from '../types';
 import { useDialog } from '../DialogContext';
 import SearchableSelect from './SearchableSelect';
-import { CheckCircle, Clock, AlertCircle, RefreshCw, Filter, DollarSign, Plus, X, Download, FileSignature, Printer, Tag, Hash, User, BookOpen, Trash2, Eye, Calendar, AlertTriangle } from 'lucide-react';
+import { CheckCircle, Clock, AlertCircle, RefreshCw, Filter, DollarSign, Plus, X, Download, FileSignature, Printer, Tag, Hash, User, BookOpen, Trash2, Eye, Calendar, AlertTriangle, Barcode, Receipt } from 'lucide-react';
 import { pdfService } from '../services/pdfService';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
@@ -22,16 +22,61 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const [isClosing, setIsClosing] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showPrintCarneModal, setShowPrintCarneModal] = useState(false);
   
   // Selection states
   const [selectedStudentHistory, setSelectedStudentHistory] = useState<Student | null>(null);
+  const [selectedStudentForCarne, setSelectedStudentForCarne] = useState<string>('');
   const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isFetchingCarne, setIsFetchingCarne] = useState(false);
 
   React.useEffect(() => {
     syncAsaasPayments();
   }, []);
+
+  const handleOpenPaymentLink = async (asaasPaymentId: string, type: 'boleto' | 'recibo') => {
+    try {
+      showAlert('Aguarde', `Buscando ${type}...`, 'info');
+      const response = await fetch(`/api/cobrancas/${asaasPaymentId}/link`);
+      const result = await response.json();
+
+      if (response.ok) {
+        const url = type === 'boleto' ? result.bankSlipUrl : result.transactionReceiptUrl;
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } else {
+          showAlert('Atenção', `${type === 'boleto' ? 'Boleto' : 'Recibo'} não disponível.`, 'warning');
+        }
+      } else {
+        showAlert('Erro', result.error || `Falha ao buscar ${type}.`, 'error');
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar ${type}:`, error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    }
+  };
+
+  const handlePrintCarne = async (studentId: string) => {
+    setIsFetchingCarne(true);
+    try {
+      const response = await fetch(`/api/alunos/${studentId}/carne`);
+      const result = await response.json();
+
+      if (response.ok && result.url) {
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+        showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+      } else {
+        showAlert('Atenção', result.error || 'Não foi possível encontrar o carnê deste aluno.', response.status === 400 ? 'warning' : 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar carnê:', error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    } finally {
+      setIsFetchingCarne(false);
+    }
+  };
 
   const syncAsaasPayments = async () => {
     if (!isSupabaseConfigured() || isSyncing) return;
@@ -57,9 +102,10 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
           });
           
           if (match) {
-            const newStatus = match.status.toLowerCase() === 'pago' ? 'paid' : 
-                             match.status.toLowerCase() === 'atrasado' ? 'overdue' : 
-                             match.status.toLowerCase() === 'cancelado' ? 'cancelled' : 'pending';
+            const statusStr = (match.status || '').toLowerCase();
+            const newStatus = statusStr === 'pago' ? 'paid' : 
+                             statusStr === 'atrasado' ? 'overdue' : 
+                             statusStr === 'cancelado' ? 'cancelled' : 'pending';
             
             if (p.status !== newStatus || p.amount !== match.valor) {
               updatedCount++;
@@ -391,24 +437,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }, 300);
   };
 
-  const togglePaymentStatus = (payment: Payment) => {
-    const updated = data.payments.map(p => {
-      if (p.id === payment.id) {
-        const isPaid = p.status === 'paid';
-        if (!isPaid) {
-          showAlert('Sucesso', 'Pagamento confirmado e registrado.', 'success');
-        }
-        return {
-          ...p,
-          status: isPaid ? 'pending' : 'paid',
-          paidDate: isPaid ? undefined : new Date().toLocaleDateString('pt-BR')
-        };
-      }
-      return p;
-    });
-    updateData({ payments: updated });
-  };
-
   const handleDelete = async (deleteType: 'single' | 'all') => {
     if (!paymentToDelete) return;
 
@@ -472,25 +500,10 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     setShowDeleteModal(true);
   };
 
-  const handleDownloadReceipt = async (payment: Payment) => {
-    const student = data.students.find(s => s.id === payment.studentId);
-    if (student) {
-      setIsGeneratingPDF(true);
-      try {
-        await pdfService.generatePaymentReceiptPDF(payment, student, data);
-      } catch (error) {
-        console.error('Erro ao gerar recibo:', error);
-        showAlert('Erro', 'Falha ao gerar o recibo em PDF.', 'error');
-      } finally {
-        setIsGeneratingPDF(false);
-      }
-    }
-  };
-
   const getStatusBadge = (payment: Payment) => {
     const status = (payment.status || '').toLowerCase();
     
-    if (status === 'paid' || status === 'pago') {
+    if (status === 'paid' || status === 'pago' || status === 'received' || status === 'confirmed') {
       const dueDate = new Date(payment.dueDate);
       const paidDate = payment.paidDate ? new Date(payment.paidDate) : null;
       
@@ -534,6 +547,12 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         </div>
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <button 
+            onClick={() => setShowPrintCarneModal(true)}
+            className="flex-1 sm:flex-none bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-50 transition-all shadow-sm font-bold active:scale-95"
+          >
+            <Printer size={20} /> Imprimir Carnê
+          </button>
+          <button 
             onClick={() => setIsModalOpen(true)}
             className="flex-1 sm:flex-none bg-indigo-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg font-bold active:scale-95"
           >
@@ -567,6 +586,20 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="relative">
+              <BookOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <select 
+                className={`${inputClass} w-full pl-9`}
+                value={filterClass}
+                onChange={e => {
+                  setFilterClass(e.target.value);
+                  setFilterStudent('all'); // Reset student filter when class changes
+                }}
+              >
+                <option value="all">Todas as Turmas</option>
+                {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="relative">
               <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <select 
                 className={`${inputClass} w-full pl-9`}
@@ -574,18 +607,9 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 onChange={e => setFilterStudent(e.target.value)}
               >
                 <option value="all">Todos os Alunos</option>
-                {data.students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="relative">
-              <BookOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <select 
-                className={`${inputClass} w-full pl-9`}
-                value={filterClass}
-                onChange={e => setFilterClass(e.target.value)}
-              >
-                <option value="all">Todas as Turmas</option>
-                {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {data.students
+                  .filter(s => filterClass === 'all' || s.classId === filterClass)
+                  .map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
           </div>
@@ -631,15 +655,26 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                     </td>
                     <td className="px-6 py-5">{getStatusBadge(payment)}</td>
                     <td className="px-6 py-5 text-right flex justify-end gap-2">
-                      <button 
-                        onClick={() => handleDownloadReceipt(payment)} 
-                        disabled={isGeneratingPDF}
-                        className="p-2 text-slate-400 hover:text-indigo-600 transition-all disabled:opacity-50" 
-                        title="Recibo"
-                      >
-                        {isGeneratingPDF ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
-                      </button>
-                      <button onClick={() => togglePaymentStatus(payment)} className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${payment.status === 'paid' ? 'text-slate-400 border-slate-200' : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}>{payment.status === 'paid' ? 'Estornar' : 'Baixar'}</button>
+                      {payment.asaasPaymentId && (
+                        <>
+                          {(payment.status === 'pending' || payment.status === 'overdue') && (
+                            <button 
+                              onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')}
+                              className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"
+                            >
+                              <Barcode size={14} /> Boleto
+                            </button>
+                          )}
+                          {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
+                            <button 
+                              onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')}
+                              className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"
+                            >
+                              <Receipt size={14} /> Recibo
+                            </button>
+                          )}
+                        </>
+                      )}
                       <button onClick={() => openDelete(payment)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir"><Trash2 size={18} /></button>
                     </td>
                   </tr>
@@ -775,7 +810,17 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 </h3>
                 <p className="text-xs text-slate-500">Histórico completo de pagamentos.</p>
               </div>
-              <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => handlePrintCarne(selectedStudentHistory.id)}
+                  disabled={isFetchingCarne}
+                  className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-all flex items-center gap-2 border border-indigo-100 disabled:opacity-50"
+                >
+                  {isFetchingCarne ? <RefreshCw size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                  Imprimir Carnê Completo
+                </button>
+                <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-0">
               <table className="w-full text-left">
@@ -797,8 +842,28 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                       </td>
                       <td className="px-4 py-3">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td>
                       <td className="px-4 py-3">R$ {p.amount.toFixed(2)}</td>
-                      <td className="px-4 py-3">{getStatusBadge(p.status)}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3">{getStatusBadge(p)}</td>
+                      <td className="px-4 py-3 text-right flex justify-end gap-2">
+                        {p.asaasPaymentId && (
+                          <>
+                            {(p.status === 'pending' || p.status === 'overdue') && (
+                              <button 
+                                onClick={() => handleOpenPaymentLink(p.asaasPaymentId!, 'boleto')}
+                                className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-[9px] font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1"
+                              >
+                                <Barcode size={12} /> Boleto
+                              </button>
+                            )}
+                            {(p.status === 'paid' || p.status === 'received' || p.status === 'confirmed') && (
+                              <button 
+                                onClick={() => handleOpenPaymentLink(p.asaasPaymentId!, 'recibo')}
+                                className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-[9px] font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 border border-emerald-100"
+                              >
+                                <Receipt size={12} /> Recibo
+                              </button>
+                            )}
+                          </>
+                        )}
                         <button onClick={() => { closeModal(); openDelete(p); }} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14}/></button>
                       </td>
                     </tr>
@@ -838,6 +903,64 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 )}
                 <button onClick={closeModal} className="w-full py-3 text-slate-400 font-bold text-sm hover:text-slate-600 mt-2">
                   Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRINT CARNE MODAL */}
+      {showPrintCarneModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl my-auto relative overflow-hidden animate-slide-up">
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight">Imprimir Carnê</h3>
+                <p className="text-xs text-slate-500">Selecione o aluno para imprimir o carnê completo.</p>
+              </div>
+              <button onClick={() => setShowPrintCarneModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <SearchableSelect
+                label="Aluno"
+                placeholder="Pesquise pelo nome do aluno..."
+                required
+                options={data.students.map(s => ({
+                  value: s.id,
+                  label: s.name
+                }))}
+                value={selectedStudentForCarne}
+                onChange={setSelectedStudentForCarne}
+              />
+              
+              <div className="flex justify-end gap-3 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => setShowPrintCarneModal(false)} 
+                  className="px-5 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    if (selectedStudentForCarne) {
+                      handlePrintCarne(selectedStudentForCarne);
+                      setShowPrintCarneModal(false);
+                      setSelectedStudentForCarne('');
+                    } else {
+                      showAlert('Atenção', 'Selecione um aluno primeiro.', 'warning');
+                    }
+                  }}
+                  disabled={!selectedStudentForCarne || isFetchingCarne}
+                  className="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isFetchingCarne ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
+                  Imprimir Carnê
                 </button>
               </div>
             </div>

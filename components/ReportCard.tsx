@@ -171,7 +171,7 @@ const ReportCard: React.FC<ReportCardProps> = ({ data, updateData }) => {
   };
 
   const filteredClasses = data.classes.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase())
+    (c.name || '').toLowerCase().includes((searchTerm || '').toLowerCase())
   );
 
   return (

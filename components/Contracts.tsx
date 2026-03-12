@@ -92,12 +92,12 @@ const Contracts: React.FC<ContractsProps> = ({ data, updateData }) => {
 
   const filteredContracts = data.contracts.filter(c => {
     const student = data.students.find(s => s.id === c.studentId);
-    const search = searchTerm.toLowerCase();
-    return c.title.toLowerCase().includes(search) || student?.name.toLowerCase().includes(search);
+    const search = (searchTerm || '').toLowerCase();
+    return (c.title || '').toLowerCase().includes(search) || (student?.name || '').toLowerCase().includes(search);
   });
 
   const filteredTemplates = (data.contractTemplates || []).filter(t => 
-    t.name.toLowerCase().includes(searchTerm.toLowerCase())
+    (t.name || '').toLowerCase().includes((searchTerm || '').toLowerCase())
   );
 
   const handleSubmit = (e: React.FormEvent) => {

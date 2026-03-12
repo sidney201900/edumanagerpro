@@ -32,9 +32,9 @@ const Employees: React.FC<EmployeesProps> = ({ data, updateData }) => {
   const categories = data.employeeCategories || [];
 
   const filteredEmployees = employees.filter(emp =>
-    emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.cpf.includes(searchTerm) ||
-    emp.email.toLowerCase().includes(searchTerm.toLowerCase())
+    (emp.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
+    (emp.cpf || '').includes(searchTerm || '') ||
+    (emp.email || '').toLowerCase().includes((searchTerm || '').toLowerCase())
   );
 
   const closeModal = () => {

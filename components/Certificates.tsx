@@ -258,7 +258,7 @@ const Certificates: React.FC<CertificatesProps> = ({ data, updateData }) => {
 
   const filteredCertificates = (data.certificates || []).filter(cert => {
     const student = data.students.find(s => s.id === cert.studentId);
-    return student?.name.toLowerCase().includes(searchTerm.toLowerCase());
+    return (student?.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
   });
 
   const currentStudentName = data.students.find(s => s.id === selectedStudentId)?.name || 'Nome do Aluno';

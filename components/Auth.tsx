@@ -32,7 +32,7 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
     await new Promise(resolve => setTimeout(resolve, 800));
 
     // Normalize inputs
-    const loginName = formData.name.trim().toLowerCase();
+    const loginName = (formData.name || '').trim().toLowerCase();
     const loginPass = formData.password.trim();
     const loginCpf = formData.cpf.replace(/\D/g, '');
 
@@ -40,7 +40,7 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
     const usersList = data.users || [];
 
     if (isRecovering) {
-      const userIndex = usersList.findIndex(u => u.name.toLowerCase() === loginName);
+      const userIndex = usersList.findIndex(u => (u.name || '').toLowerCase() === loginName);
       const user = usersList[userIndex];
       
       if (user) {
@@ -74,7 +74,7 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
     } else {
       // Login Logic
       const user = usersList.find(u => 
-        u.name.toLowerCase() === loginName && 
+        (u.name || '').toLowerCase() === loginName && 
         u.password === loginPass
       );
       

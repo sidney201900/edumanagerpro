@@ -248,12 +248,12 @@ const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
   };
 
   const filteredClasses = classes.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase())
+    (c.name || '').toLowerCase().includes((searchTerm || '').toLowerCase())
   );
 
   const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.cpf.includes(searchTerm)
+    (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
+    (s.cpf || '').includes(searchTerm || '')
   );
 
   return (

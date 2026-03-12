@@ -4,7 +4,7 @@ import { dbService } from '../services/dbService';
 import { addHeader, pdfService } from '../services/pdfService';
 import { useDialog } from '../DialogContext';
 import { compressImage } from '../services/imageService';
-import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen, Barcode, Receipt } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,6 +26,9 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   const [newClassId, setNewClassId] = useState('');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [isFetchingCarne, setIsFetchingCarne] = useState(false);
+  const [selectedPayments, setSelectedPayments] = useState<string[]>([]);
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false);
+  const [showDeleteBatchModal, setShowDeleteBatchModal] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState<Partial<Student>>({
@@ -317,8 +320,10 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
       if (response.ok && result.url) {
         window.open(result.url, '_blank');
+        showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
       } else {
-        showAlert('Erro', result.error || 'Não foi possível encontrar o carnê deste aluno.', 'error');
+        // O backend agora retorna 400 com mensagem específica se não for parcelamento
+        showAlert('Atenção', result.error || 'Não foi possível encontrar o carnê deste aluno.', response.status === 400 ? 'warning' : 'error');
       }
     } catch (error) {
       console.error('Erro ao buscar carnê:', error);
@@ -326,6 +331,72 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     } finally {
       setIsFetchingCarne(false);
     }
+  };
+
+  const handleOpenPaymentLink = async (asaasPaymentId: string, type: 'boleto' | 'recibo') => {
+    try {
+      showAlert('Aguarde', `Buscando ${type}...`, 'info');
+      const response = await fetch(`/api/cobrancas/${asaasPaymentId}/link`);
+      const result = await response.json();
+
+      if (response.ok) {
+        const url = type === 'boleto' ? result.bankSlipUrl : result.transactionReceiptUrl;
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } else {
+          showAlert('Atenção', `${type === 'boleto' ? 'Boleto' : 'Recibo'} não disponível.`, 'warning');
+        }
+      } else {
+        showAlert('Erro', result.error || `Falha ao buscar ${type}.`, 'error');
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar ${type}:`, error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    }
+  };
+
+  const handleDeleteBatch = async () => {
+    if (selectedPayments.length === 0) return;
+    
+    setIsDeletingBatch(true);
+    try {
+      const response = await fetch('/api/cobrancas/lote', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ids: selectedPayments })
+      });
+
+      if (response.ok || response.status === 207) {
+        const result = await response.json();
+        showAlert('Sucesso', result.message || 'Cobranças excluídas com sucesso.', 'success');
+        
+        // Atualizar dados locais (Supabase já foi atualizado pelo backend)
+        const updatedPayments = data.payments.filter(p => !selectedPayments.includes(p.asaasPaymentId || ''));
+        updateData({ payments: updatedPayments });
+        
+        setSelectedPayments([]);
+        setShowDeleteBatchModal(false);
+      } else {
+        const errorData = await response.json();
+        showAlert('Erro', errorData.error || 'Falha ao excluir cobranças em lote.', 'error');
+      }
+    } catch (error) {
+      console.error('Erro na exclusão em lote:', error);
+      showAlert('Erro', 'Erro de conexão ao tentar excluir cobranças.', 'error');
+    } finally {
+      setIsDeletingBatch(false);
+    }
+  };
+
+  const togglePaymentSelection = (asaasId: string) => {
+    if (!asaasId) return;
+    setSelectedPayments(prev => 
+      prev.includes(asaasId) 
+        ? prev.filter(id => id !== asaasId) 
+        : [...prev, asaasId]
+    );
   };
 
   const checkCEP = async (cepValue?: string) => {
@@ -526,6 +597,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     setIsClosing(true);
     setTimeout(() => {
       setViewingStudentHistory(null);
+      setSelectedPayments([]);
       setIsClosing(false);
     }, 400);
   };
@@ -789,7 +861,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   };
 
   const filteredStudents = data.students.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase())
+    (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase())
   );
 
   const generatePDF = async () => {
@@ -1413,6 +1485,14 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
               </div>
             </div>
           )}
+          {isDeletingBatch && (
+            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-slide-up">
+              <div className="bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-800">
+                <Loader2 size={20} className="animate-spin text-red-400" />
+                <span className="font-bold text-sm tracking-tight">Apagando parcelas...</span>
+              </div>
+            </div>
+          )}
           <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
           <div className={`bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
             {/* Blue Top Bar */}
@@ -1433,14 +1513,6 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => handlePrintCarne(viewingStudentHistory.id)}
-                  disabled={isFetchingCarne}
-                  className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg font-bold hover:bg-indigo-100 transition-all flex items-center gap-2 border border-indigo-100 disabled:opacity-50"
-                >
-                  {isFetchingCarne ? <Loader2 size={18} className="animate-spin" /> : <Printer size={18} />}
-                  Imprimir Carnê
-                </button>
                 <button onClick={closeHistoryModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                   <X size={24} className="text-slate-400" />
                 </button>
@@ -1485,24 +1557,72 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
 
               {/* Payments Section */}
               <section>
-                <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-emerald-500 rounded-full"></span> Histórico de Pagamentos
-                </h4>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full"></span> Histórico de Pagamentos
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => handlePrintCarne(viewingStudentHistory.id)}
+                      disabled={isFetchingCarne}
+                      className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-all flex items-center gap-2 border border-indigo-100 disabled:opacity-50"
+                    >
+                      {isFetchingCarne ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                      Imprimir Carnê Completo
+                    </button>
+                    {selectedPayments.length > 0 && (
+                      <button 
+                        onClick={() => setShowDeleteBatchModal(true)}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 transition-all flex items-center gap-2 shadow-lg shadow-red-100 animate-in slide-in-from-right-4"
+                      >
+                        <Trash2 size={14} /> Apagar Selecionadas ({selectedPayments.length})
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <table className="w-full text-left">
                     <thead className="bg-slate-50 border-b border-slate-100">
                       <tr>
+                        <th className="p-4 w-10">
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                            onChange={(e) => {
+                              const studentPayments = data.payments.filter(p => p.studentId === viewingStudentHistory.id && p.asaasPaymentId);
+                              if (e.target.checked) {
+                                setSelectedPayments(studentPayments.map(p => p.asaasPaymentId!));
+                              } else {
+                                setSelectedPayments([]);
+                              }
+                            }}
+                            checked={
+                              selectedPayments.length > 0 && 
+                              selectedPayments.length === data.payments.filter(p => p.studentId === viewingStudentHistory.id && p.asaasPaymentId).length
+                            }
+                          />
+                        </th>
                         <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descrição</th>
                         <th className="p-4 text-xs font-bold text-slate-500 uppercase">Vencimento</th>
                         <th className="p-4 text-xs font-bold text-slate-500 uppercase">Valor</th>
                         <th className="p-4 text-xs font-bold text-slate-500 uppercase">Status</th>
                         <th className="p-4 text-xs font-bold text-slate-500 uppercase">Data Pagamento</th>
+                        <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {data.payments.filter(p => p.studentId === viewingStudentHistory.id).length > 0 ? (
                         data.payments.filter(p => p.studentId === viewingStudentHistory.id).map(payment => (
-                          <tr key={payment.id} className="hover:bg-slate-50">
+                          <tr key={payment.id} className={`hover:bg-slate-50 transition-colors ${selectedPayments.includes(payment.asaasPaymentId || '') ? 'bg-indigo-50/50' : ''}`}>
+                            <td className="p-4">
+                              <input 
+                                type="checkbox" 
+                                className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                                checked={selectedPayments.includes(payment.asaasPaymentId || '')}
+                                onChange={() => togglePaymentSelection(payment.asaasPaymentId || '')}
+                                disabled={!payment.asaasPaymentId}
+                              />
+                            </td>
                             <td className="p-4 text-sm font-medium text-slate-700">
                               {payment.description || (payment.type === 'monthly' ? `Mensalidade ${payment.installmentNumber}/${payment.totalInstallments}` : 'Taxa')}
                             </td>
@@ -1512,23 +1632,46 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                             </td>
                             <td className="p-4">
                               <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                payment.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                                (payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') ? 'bg-emerald-100 text-emerald-700' :
                                 payment.status === 'overdue' ? 'bg-red-100 text-red-700' :
                                 'bg-amber-100 text-amber-700'
                               }`}>
-                                {payment.status === 'paid' ? 'Pago' : payment.status === 'overdue' ? 'Atrasado' : 'Pendente'}
+                                {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') ? 'Pago' : payment.status === 'overdue' ? 'Atrasado' : 'Pendente'}
                               </span>
                             </td>
                             <td className="p-4 text-sm text-slate-500">
                               {payment.paidDate ? new Date(payment.paidDate).toLocaleDateString() : '-'}
                             </td>
+                            <td className="p-4 text-right">
+                              {payment.asaasPaymentId && (
+                                <>
+                                  {(payment.status === 'pending' || payment.status === 'overdue') && (
+                                    <button 
+                                      onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')}
+                                      className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"
+                                    >
+                                      <Barcode size={14} /> Boleto
+                                    </button>
+                                  )}
+                                  {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
+                                    <button 
+                                      onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')}
+                                      className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"
+                                    >
+                                      <Receipt size={14} /> Recibo
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-slate-400 text-sm">Nenhum pagamento registrado.</td>
+                          <td colSpan={7} className="p-8 text-center text-slate-400 text-sm">Nenhum pagamento registrado.</td>
                         </tr>
                       )}
+
                     </tbody>
                   </table>
                 </div>
@@ -1547,6 +1690,39 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
         </div>
       </>
     )}
+      {/* Batch Delete Confirmation Modal */}
+      {showDeleteBatchModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
+            <div className="bg-red-600 h-1.5 w-full"></div>
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertCircle size={32} />
+              </div>
+              <h3 className="text-xl font-black text-slate-800 mb-2">Confirmar Exclusão</h3>
+              <p className="text-slate-500 text-sm mb-8">
+                Tem a certeza que deseja apagar as <strong>{selectedPayments.length}</strong> parcelas selecionadas? Esta ação não pode ser desfeita e irá cancelar as cobranças no Asaas.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowDeleteBatchModal(false)}
+                  className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleDeleteBatch}
+                  disabled={isDeletingBatch}
+                  className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg shadow-red-100 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isDeletingBatch ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                  {isDeletingBatch ? 'Apagando...' : 'Sim, Apagar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

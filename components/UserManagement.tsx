@@ -117,7 +117,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ data, updateData }) => 
 
     if (editingUser) {
       // Check if name is taken by another user
-      const exists = data.users.some(u => u.name.toLowerCase() === formData.name.toLowerCase() && u.id !== editingUser.id);
+      const exists = data.users.some(u => (u.name || '').toLowerCase() === (formData.name || '').toLowerCase() && u.id !== editingUser.id);
       if (exists) {
         showAlert('Atenção', '⚠️ Este nome de usuário já está em uso.', 'warning');
         return;
@@ -137,7 +137,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ data, updateData }) => 
       updateData({ users: updatedUsers });
     } else {
       // Check if name is taken
-      const exists = data.users.some(u => u.name.toLowerCase() === formData.name.toLowerCase());
+      const exists = data.users.some(u => (u.name || '').toLowerCase() === (formData.name || '').toLowerCase());
       if (exists) {
         showAlert('Atenção', '⚠️ Este nome de usuário já está em uso.', 'warning');
         return;
