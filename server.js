@@ -211,6 +211,8 @@ app.post('/api/gerar_cobranca', async (req, res) => {
        }];
     }
 
+    console.log('Dados salvos no Supabase:', paymentsToSave);
+
     const { error: dbError } = await supabase
       .from('alunos_cobrancas')
       .insert(paymentsToSave);
@@ -303,60 +305,54 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
   try {
     const alunoId = req.params.id;
 
-    // 1. Buscar a cobrança mais recente do aluno para pegar o ID do Asaas
-    const { data, error: dbError } = await supabase
+    // 1. Buscar a cobrança mais recente do aluno que tenha um installment válido
+    console.log(`Buscando carnê para o aluno: ${alunoId}`);
+    const { data: cobrancas, error: dbError } = await supabase
       .from('alunos_cobrancas')
-      .select('asaas_payment_id')
+      .select('installment')
       .eq('aluno_id', alunoId)
+      .not('installment', 'is', null)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
-    if (dbError || !data) {
-      console.error('Cobrança não encontrada para o aluno:', alunoId, dbError);
-      return res.status(404).json({ error: 'Nenhuma cobrança encontrada para este aluno.' });
+    if (dbError) {
+      console.error('Erro ao buscar cobranças no Supabase:', dbError);
+      return res.status(500).json({ error: 'Erro ao buscar dados no banco de dados.' });
     }
 
-    const asaasPaymentId = data.asaas_payment_id;
+    if (!cobrancas || cobrancas.length === 0 || !cobrancas[0].installment) {
+      console.log(`Nenhum installment encontrado para o aluno: ${alunoId}`);
+      return res.status(400).json({ 
+        error: 'Não é possível gerar um carnê único para cobranças avulsas ou o aluno não possui parcelamentos.' 
+      });
+    }
 
-    // 2. Buscar detalhes do pagamento no Asaas
-    const paymentRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${asaasPaymentId}`, {
+    const installmentId = cobrancas[0].installment;
+    console.log(`Installment encontrado: ${installmentId}`);
+
+    // 2. Buscar detalhes do parcelamento no Asaas
+    const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${installmentId}`, {
       method: 'GET',
       headers: {
         'access_token': process.env.ASAAS_API_KEY
       }
     });
 
-    if (!paymentRes.ok) {
-      const errorData = await paymentRes.json();
-      console.error('Erro ao buscar pagamento no Asaas:', errorData);
-      return res.status(500).json({ error: 'Erro ao buscar dados no Asaas.' });
+    if (!installmentRes.ok) {
+      const errorData = await installmentRes.json();
+      console.error(`Erro ao buscar installment ${installmentId} no Asaas:`, errorData);
+      return res.status(500).json({ error: 'Erro ao buscar dados do carnê no Asaas.' });
     }
 
-    const paymentData = await paymentRes.json();
-
-    // 3. Verificar se pertence a um parcelamento (Installment)
-    if (paymentData.installment) {
-      const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${paymentData.installment}`, {
-        method: 'GET',
-        headers: {
-          'access_token': process.env.ASAAS_API_KEY
-        }
-      });
-
-      if (installmentRes.ok) {
-        const installmentData = await installmentRes.json();
-        if (installmentData.paymentBookUrl) {
-          return res.status(200).json({ url: installmentData.paymentBookUrl });
-        }
-      }
+    const installmentData = await installmentRes.json();
+    
+    if (installmentData.paymentBookUrl) {
+      console.log(`URL do carnê encontrada: ${installmentData.paymentBookUrl}`);
+      return res.status(200).json({ url: installmentData.paymentBookUrl });
+    } else {
+      console.log(`Installment ${installmentId} não possui paymentBookUrl.`);
       return res.status(404).json({ error: 'Link do carnê não disponível para este parcelamento.' });
     }
-
-    // 4. Se não houver installment (cobranças avulsas), retorna erro 400 conforme solicitado
-    return res.status(400).json({ 
-      error: 'Não é possível gerar um carnê único para cobranças avulsas.' 
-    });
 
   } catch (error) {
     console.error('Erro ao buscar carnê:', error);
