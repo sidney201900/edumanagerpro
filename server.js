@@ -153,6 +153,8 @@ app.post('/api/gerar_cobranca', async (req, res) => {
     if (!isNaN(interestValue) && interestValue > 0) asaasPayload.interest = { value: interestValue, type: 'PERCENTAGE' };
     if (!isNaN(discountValue) && discountValue > 0) asaasPayload.discount = { value: discountValue, dueDateLimitDays: 0, type: 'FIXED' };
 
+    console.log('Payload enviado para o Asaas:', asaasPayload);
+
     const paymentRes = await fetch('https://sandbox.asaas.com/api/v3/payments', {
       method: 'POST',
       headers: {
@@ -345,6 +347,7 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
     }
 
     const installmentData = await installmentRes.json();
+    console.log('Resposta do Asaas ao buscar o Installment:', installmentData);
     
     if (installmentData.paymentBookUrl) {
       console.log(`URL do carnê encontrada: ${installmentData.paymentBookUrl}`);
