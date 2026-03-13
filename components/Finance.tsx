@@ -913,35 +913,37 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       {/* PRINT CARNE MODAL */}
       {showPrintCarneModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in">
-          <div className="bg-white rounded-xl w-full max-w-md shadow-2xl my-auto relative overflow-hidden animate-slide-up">
+          <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl my-auto relative overflow-hidden animate-slide-up">
             <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
             
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
               <div>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight">Imprimir Carnê</h3>
-                <p className="text-xs text-slate-500">Selecione o aluno para imprimir o carnê completo.</p>
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Imprimir Carnê</h3>
+                <p className="text-sm text-slate-500 mt-1">Selecione o aluno para buscar e imprimir o carnê completo do Asaas.</p>
               </div>
-              <button onClick={() => setShowPrintCarneModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+              <button onClick={() => setShowPrintCarneModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={24} /></button>
             </div>
             
-            <div className="p-6 space-y-6">
-              <SearchableSelect
-                label="Aluno"
-                placeholder="Pesquise pelo nome do aluno..."
-                required
-                options={data.students.map(s => ({
-                  value: s.id,
-                  label: s.name
-                }))}
-                value={selectedStudentForCarne}
-                onChange={setSelectedStudentForCarne}
-              />
+            <div className="p-8 space-y-8">
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                <SearchableSelect
+                  label="Aluno"
+                  placeholder="Pesquise pelo nome do aluno..."
+                  required
+                  options={data.students.map(s => ({
+                    id: s.id,
+                    name: s.name
+                  }))}
+                  value={selectedStudentForCarne}
+                  onChange={setSelectedStudentForCarne}
+                />
+              </div>
               
-              <div className="flex justify-end gap-3 pt-4">
+              <div className="flex justify-end gap-4 pt-4 border-t border-slate-100">
                 <button 
                   type="button" 
                   onClick={() => setShowPrintCarneModal(false)} 
-                  className="px-5 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors"
+                  className="px-6 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors"
                 >
                   Cancelar
                 </button>
@@ -957,9 +959,9 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                     }
                   }}
                   disabled={!selectedStudentForCarne || isFetchingCarne}
-                  className="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-lg"
                 >
-                  {isFetchingCarne ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
+                  {isFetchingCarne ? <RefreshCw size={20} className="animate-spin" /> : <Printer size={20} />}
                   Imprimir Carnê
                 </button>
               </div>

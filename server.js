@@ -3,20 +3,22 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
+import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+async function startServer() {
+  const app = express();
+  const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(cors());
+  app.use(express.json());
+  app.use(cors());
 
-// Supabase Setup
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+  // Supabase Setup
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseKey = process.env.VITE_SUPABASE_KEY;
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Webhook Asaas
 app.post('/api/webhook_asaas', async (req, res) => {
@@ -410,13 +412,23 @@ app.delete('/api/cobrancas/lote', async (req, res) => {
 });
 
 // Servir o Frontend
-app.use(express.static(path.join(__dirname, 'dist')));
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    // Fallback do React Router com Regex nativa
+    app.get(/.*/, (req, res) => {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+  }
 
-// Fallback do React Router com Regex nativa
-app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+  app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+  });
+}
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+startServer();
