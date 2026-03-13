@@ -171,20 +171,49 @@ app.post('/api/gerar_cobranca', async (req, res) => {
 
     const paymentData = await paymentRes.json();
 
-    // 3. Save to Supabase (Initial charge or first installment)
-    const paymentId = paymentData.id || (paymentData.installments && paymentData.installments[0].id);
-    const bankSlipUrl = paymentData.bankSlipUrl || (paymentData.installments && paymentData.installments[0].bankSlipUrl);
+    // 3. Save to Supabase
+    let paymentsToSave = [];
+    
+    if (parcelas && parcelas > 1 && paymentData.installment) {
+      // Fetch all installments
+      const installmentId = paymentData.installment;
+      const installmentsRes = await fetch(`https://sandbox.asaas.com/api/v3/payments?installment=${installmentId}`, {
+        method: 'GET',
+        headers: {
+          'access_token': process.env.ASAAS_API_KEY
+        }
+      });
+      
+      if (installmentsRes.ok) {
+        const installmentsData = await installmentsRes.json();
+        paymentsToSave = installmentsData.data.map(p => ({
+          aluno_id: aluno_id,
+          asaas_customer_id: customerId,
+          asaas_payment_id: p.id,
+          installment: installmentId,
+          valor: p.value,
+          vencimento: p.dueDate,
+          link_boleto: p.bankSlipUrl
+        }));
+      } else {
+        console.error('Falha ao buscar parcelas do installment:', installmentId);
+        throw new Error('Falha ao buscar parcelas do Asaas');
+      }
+    } else {
+       paymentsToSave = [{
+          aluno_id: aluno_id,
+          asaas_customer_id: customerId,
+          asaas_payment_id: paymentData.id,
+          installment: paymentData.installment || null,
+          valor: paymentData.value || valor,
+          vencimento: paymentData.dueDate || vencimento,
+          link_boleto: paymentData.bankSlipUrl
+       }];
+    }
 
     const { error: dbError } = await supabase
       .from('alunos_cobrancas')
-      .insert([{
-        aluno_id: aluno_id,
-        asaas_customer_id: customerId,
-        asaas_payment_id: paymentId,
-        valor: valor,
-        vencimento: vencimento,
-        link_boleto: bankSlipUrl
-      }]);
+      .insert(paymentsToSave);
 
     if (dbError) {
       console.error('Supabase Insert Error:', dbError);
@@ -192,8 +221,11 @@ app.post('/api/gerar_cobranca', async (req, res) => {
     }
 
     return res.status(200).json({ 
-      bankSlipUrl: bankSlipUrl,
-      paymentId: paymentId
+      success: true,
+      installment: paymentData.installment || null,
+      payments: paymentsToSave,
+      bankSlipUrl: paymentsToSave[0]?.link_boleto,
+      paymentId: paymentsToSave[0]?.asaas_payment_id
     });
 
   } catch (error) {

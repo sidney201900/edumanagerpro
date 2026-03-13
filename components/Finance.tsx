@@ -329,48 +329,47 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
 
     try {
-      const asaasRequests = newPayments.map(payment => {
-        const rawCpf = (student.cpf || student.guardianCpf || '').replace(/\D/g, '');
-        // Garantir que a data esteja em formato ISO YYYY-MM-DD (string pura)
-        const isoDueDate = payment.dueDate;
-        
-        return fetch('/api/gerar_cobranca', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            aluno_id: student.id,
-            nome: student.name,
-            cpf: rawCpf,
-            email: student.email,
-            valor: payment.amount,
-            vencimento: isoDueDate,
-            multa: payment.lateFee,
-            juros: payment.interest,
-            desconto: Number(payment.discount) || 0,
-            telefone: student.phone,
-            cep: student.addressZip,
-            endereco: student.addressStreet,
-            numero: student.addressNumber,
-            bairro: student.addressNeighborhood,
-            nascimento: student.birthDate,
-            descricao: payment.description,
-            parcelas: 1
-          })
-        });
+      const rawCpf = (student.cpf || student.guardianCpf || '').replace(/\D/g, '');
+      const isoDueDate = newPayments[0].dueDate;
+      
+      const response = await fetch('/api/gerar_cobranca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aluno_id: student.id,
+          nome: student.name,
+          cpf: rawCpf,
+          email: student.email,
+          valor: formData.amount,
+          vencimento: isoDueDate,
+          multa: formData.fine,
+          juros: formData.interest,
+          desconto: Number(formData.discount) || 0,
+          telefone: student.phone,
+          cep: student.addressZip,
+          endereco: student.addressStreet,
+          numero: student.addressNumber,
+          bairro: student.addressNeighborhood,
+          nascimento: student.birthDate,
+          descricao: formData.description || 'Mensalidade',
+          parcelas: manualInstallments
+        })
       });
 
-      const asaasResponses = await Promise.all(asaasRequests);
-      const asaasData = await Promise.all(asaasResponses.map(async r => {
-        if (r.ok) return r.json();
-        return null;
-      }));
-      
-      newPayments.forEach((p, idx) => {
-        if (asaasData[idx]) {
-          p.asaasPaymentUrl = asaasData[idx].bankSlipUrl;
-          p.asaasPaymentId = asaasData[idx].paymentId;
+      if (response.ok) {
+        const asaasData = await response.json();
+        
+        if (asaasData.payments && asaasData.payments.length > 0) {
+          newPayments.forEach((p, idx) => {
+            // Se o Asaas retornou menos parcelas que o esperado, usa a última disponível
+            const asaasPayment = asaasData.payments[idx] || asaasData.payments[asaasData.payments.length - 1];
+            p.asaasPaymentUrl = asaasPayment.link_boleto;
+            p.asaasPaymentId = asaasPayment.asaas_payment_id;
+          });
         }
-      });
+      } else {
+        throw new Error('Erro na resposta da API');
+      }
     } catch (error) {
       console.error('Erro ao conectar com o Asaas:', error);
       showAlert('Atenção', 'Erro ao conectar com o Asaas. Lançamentos salvos apenas localmente.', 'warning');
