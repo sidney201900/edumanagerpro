@@ -97,6 +97,21 @@ const App = () => {
     };
   }, [data, isCloudEnabled]);
 
+  // 3. Dynamic Favicon
+  useEffect(() => {
+    const logoUrl = data.profile?.logo;
+    if (logoUrl) {
+      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+      if (!link) {
+        link = document.createElement('link');
+        link.type = 'image/x-icon';
+        link.rel = 'icon';
+        document.getElementsByTagName('head')[0].appendChild(link);
+      }
+      link.href = logoUrl;
+    }
+  }, [data.profile?.logo]);
+
   const updateData = (newData: Partial<SchoolData>) => {
     setData(prev => ({ 
       ...prev, 
@@ -165,7 +180,7 @@ const App = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50 relative">
-      <Sidebar currentView={currentView} setView={setCurrentView} user={currentUser} />
+      <Sidebar currentView={currentView} setView={setCurrentView} user={currentUser} logo={data.profile.logo} />
       <main className="flex-1 w-full overflow-y-auto max-h-screen pt-16 md:pt-0 relative">
         {/* Sync Indicator - Green Strip on the Right */}
         {syncStatus === 'syncing' && (

@@ -29,9 +29,10 @@ interface SidebarProps {
   currentView: View;
   setView: (view: View) => void;
   user: User | null;
+  logo?: string;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, user }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, user, logo }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -60,7 +61,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, user }) => {
       {/* Mobile Toggle */}
       <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b border-slate-200 p-4 flex justify-between items-center z-40">
         <h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">
-          <BookOpen size={24} />
+          {logo ? <img src={logo} alt="Logo" className="h-8 w-auto object-contain" /> : <BookOpen size={24} />}
           <span>EduManager</span>
         </h1>
         <button onClick={toggleMobile} className="p-2 text-slate-600">
@@ -85,11 +86,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, user }) => {
         <div className={`p-6 border-b border-slate-200 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
           {(!isCollapsed || isMobileOpen) && (
             <h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2 overflow-hidden whitespace-nowrap">
-              <BookOpen size={24} className="flex-shrink-0" />
+              {logo ? <img src={logo} alt="Logo" className="h-8 w-auto object-contain flex-shrink-0" /> : <BookOpen size={24} className="flex-shrink-0" />}
               <span>EduManager</span>
             </h1>
           )}
-          {isCollapsed && !isMobileOpen && <BookOpen size={24} className="text-indigo-600" />}
+          {isCollapsed && !isMobileOpen && (logo ? <img src={logo} alt="Logo" className="h-8 w-auto object-contain" /> : <BookOpen size={24} className="text-indigo-600" />)}
           
           <button 
             onClick={() => setIsCollapsed(!isCollapsed)}

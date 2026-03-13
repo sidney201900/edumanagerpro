@@ -87,11 +87,25 @@ using (true);`;
     const file = e.target.files?.[0];
     if (file) {
       try {
-        const compressed = await compressImage(file);
-        setProfile(prev => ({ ...prev, logo: compressed }));
+        showAlert('Aguarde', 'Fazendo upload e otimizando a logo...', 'info');
+        const formData = new FormData();
+        formData.append('logo', file);
+
+        const response = await fetch('/api/upload/logo', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error('Falha no upload da logo');
+        }
+
+        const data = await response.json();
+        setProfile(prev => ({ ...prev, logo: data.url }));
+        showAlert('Sucesso', 'Logo atualizada com sucesso!', 'success');
       } catch (error) {
-        console.error('Erro ao comprimir imagem:', error);
-        showAlert('Erro', 'Falha ao processar imagem.', 'error');
+        console.error('Erro ao fazer upload da imagem:', error);
+        showAlert('Erro', 'Falha ao processar e salvar a imagem.', 'error');
       }
     }
   };

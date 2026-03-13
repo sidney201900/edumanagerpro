@@ -50,11 +50,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         const result = await response.json();
 
         if (response.ok) {
-          if (result.fallback) {
-            setFallbackInstallments(result.parcelas);
+          if (result.type === 'fallback') {
+            setFallbackInstallments(result.boletos);
             setShowFallbackModal(true);
             showAlert('Atenção', result.message, 'info');
-          } else if (result.url) {
+          } else if (result.type === 'pdf' && result.url) {
             window.open(result.url, '_blank', 'noopener,noreferrer');
             showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
           }
@@ -90,11 +90,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       const result = await response.json();
 
       if (response.ok) {
-        if (result.fallback) {
-          setFallbackInstallments(result.parcelas);
+        if (result.type === 'fallback') {
+          setFallbackInstallments(result.boletos);
           setShowFallbackModal(true);
           showAlert('Atenção', result.message, 'info');
-        } else if (result.url) {
+        } else if (result.type === 'pdf' && result.url) {
           window.open(result.url, '_blank', 'noopener,noreferrer');
           showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
         }
@@ -520,50 +520,51 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const handleDelete = async (deleteType: 'single' | 'all') => {
     if (!paymentToDelete) return;
 
-    let updatedPayments = [...data.payments];
-
-    if (deleteType === 'single') {
-      try {
-        const response = await fetch('/api/excluir_cobranca', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            aluno_id: paymentToDelete.studentId,
-            valor: paymentToDelete.amount,
-            vencimento: paymentToDelete.dueDate
-          })
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-          if (result.asaasError) {
-            showAlert('Aviso', `Cobrança removida do sistema, mas o Asaas retornou: ${result.asaasError}`, 'warning');
-          } else {
-            showAlert('Sucesso', 'Cobrança cancelada com sucesso no Asaas e no sistema.', 'success');
-          }
-        } else {
-          showAlert('Erro', 'Erro ao processar exclusão no servidor.', 'error');
-        }
-      } catch (error) {
-        console.error('Erro ao excluir no Asaas:', error);
-        showAlert('Erro', 'Falha na comunicação com o servidor ao excluir.', 'error');
-      }
-
-      updatedPayments = updatedPayments.filter(p => p.id !== paymentToDelete.id);
-    } else {
-      // Delete all pending payments for this student (or specific contract)
-      updatedPayments = updatedPayments.filter(p => {
-        const isSameStudent = p.studentId === paymentToDelete.studentId;
-        const isPending = p.status !== 'paid'; // Keep history of paid ones usually
-        const isSameContract = paymentToDelete.contractId ? p.contractId === paymentToDelete.contractId : true;
-        
-        // Don't delete if it matches criteria
-        return !(isSameStudent && isPending && isSameContract);
-      });
+    // Determine the ID to send
+    let asaasIdToDelete = '';
+    
+    if (deleteType === 'all' && paymentToDelete.installmentId) {
+      asaasIdToDelete = paymentToDelete.installmentId;
+    } else if (paymentToDelete.asaasPaymentId) {
+      asaasIdToDelete = paymentToDelete.asaasPaymentId;
+    } else if (paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_')) {
+      asaasIdToDelete = paymentToDelete.id;
     }
 
-    updateData({ payments: updatedPayments });
+    if (!asaasIdToDelete) {
+      showAlert('Erro', 'ID da cobrança não encontrado.', 'error');
+      return;
+    }
+
+    try {
+      showAlert('Aguarde', 'Excluindo cobrança...', 'info');
+      const response = await fetch('/api/excluir_cobranca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: asaasIdToDelete })
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        showAlert('Sucesso', 'Cobrança excluída com sucesso.', 'success');
+        
+        // Update local state
+        let updatedPayments = [...data.payments];
+        if (asaasIdToDelete.startsWith('inst_')) {
+          updatedPayments = updatedPayments.filter(p => p.installmentId !== asaasIdToDelete);
+        } else {
+          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== asaasIdToDelete);
+        }
+        updateData({ payments: updatedPayments });
+      } else {
+        showAlert('Erro', result.error || 'Não é possível excluir uma cobrança já paga.', 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao excluir:', error);
+      showAlert('Erro', 'Falha na comunicação com o servidor ao excluir.', 'error');
+    }
+
     closeModal();
   };
 
@@ -1094,13 +1095,21 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
               <p className="text-sm text-slate-500 mb-6">Como deseja excluir este lançamento?</p>
               
               <div className="flex flex-col gap-2">
-                <button onClick={() => handleDelete('single')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">
-                  Excluir Apenas Esta
-                </button>
-                {(paymentToDelete.contractId || paymentToDelete.totalInstallments) && (
-                  <button onClick={() => handleDelete('all')} className="w-full py-3 bg-white border-2 border-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">
-                    Excluir Todas Restantes
+                {paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_') ? (
+                  <button onClick={() => handleDelete('all')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">
+                    Excluir Carnê Completo
                   </button>
+                ) : (
+                  <>
+                    <button onClick={() => handleDelete('single')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">
+                      Excluir Apenas Esta
+                    </button>
+                    {(paymentToDelete.contractId || paymentToDelete.totalInstallments) && (
+                      <button onClick={() => handleDelete('all')} className="w-full py-3 bg-white border-2 border-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">
+                        Excluir Todas Restantes
+                      </button>
+                    )}
+                  </>
                 )}
                 <button onClick={closeModal} className="w-full py-3 text-slate-400 font-bold text-sm hover:text-slate-600 mt-2">
                   Cancelar

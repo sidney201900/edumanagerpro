@@ -95,9 +95,13 @@ const Auth: React.FC<AuthProps> = ({ data, onLogin, onUpdateUsers }) => {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-100 animate-zoom-in">
         <div className="p-8 pb-6 bg-white">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
-              <BookOpen size={32} />
-            </div>
+            {data.profile.logo ? (
+              <img src={data.profile.logo} alt="Logo" className="h-28 w-auto max-w-full object-contain" />
+            ) : (
+              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
+                <BookOpen size={32} />
+              </div>
+            )}
           </div>
           <h2 className="text-2xl font-black text-center text-slate-800 mb-1">
             {isRecovering ? 'Recuperar Senha' : 'Acesso Restrito'}

@@ -20,9 +20,11 @@
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",
     "lucide-react": "^0.563.0",
+    "multer": "^2.1.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
