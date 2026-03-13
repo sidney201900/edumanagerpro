@@ -523,12 +523,18 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     // Determine the ID to send
     let asaasIdToDelete = '';
     
-    if (deleteType === 'all' && paymentToDelete.installmentId) {
-      asaasIdToDelete = paymentToDelete.installmentId;
-    } else if (paymentToDelete.asaasPaymentId) {
-      asaasIdToDelete = paymentToDelete.asaasPaymentId;
-    } else if (paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_')) {
+    // Se o usuário estiver na aba de 'Parcelamentos' e clicar na lixeira do grupo, 
+    // a função deve capturar obrigatoriamente o ID do installment (que começa com inst_)
+    if (paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_')) {
       asaasIdToDelete = paymentToDelete.id;
+    } 
+    // Se estiver nas outras abas (Avulsas/Todas) ou dentro dos detalhes do carnê, 
+    // capture o asaas_payment_id (que começa com pay_).
+    else if (paymentToDelete.asaasPaymentId && paymentToDelete.asaasPaymentId.startsWith('pay_')) {
+      asaasIdToDelete = paymentToDelete.asaasPaymentId;
+    } else if (deleteType === 'all' && paymentToDelete.installmentId && paymentToDelete.installmentId.startsWith('inst_')) {
+      // Fallback para caso o usuário clique em "Excluir Todas Restantes" a partir de uma parcela individual
+      asaasIdToDelete = paymentToDelete.installmentId;
     }
 
     if (!asaasIdToDelete) {
