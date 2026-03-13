@@ -138,11 +138,15 @@ app.post('/api/gerar_cobranca', async (req, res) => {
       description: descricao ? `${descricao} - Microtec Informática Cursos` : 'Mensalidade - Microtec Informática Cursos'
     };
 
-    if (parcelas && parcelas > 1) {
-      asaasPayload.installmentCount = parcelas;
-      asaasPayload.installmentValue = valor;
+    const isInstallment = parcelas && parseInt(parcelas) > 1;
+
+    if (isInstallment) {
+      // Condição B: Parcelamento / Carnê (> 1 Parcela)
+      asaasPayload.installmentCount = parseInt(parcelas);
+      asaasPayload.installmentValue = parseFloat(valor);
     } else {
-      asaasPayload.value = valor;
+      // Condição A: Cobrança Avulsa (1 Parcela)
+      asaasPayload.value = parseFloat(valor);
     }
 
     const fineValue = parseFloat(multa);
@@ -176,9 +180,11 @@ app.post('/api/gerar_cobranca', async (req, res) => {
     // 3. Save to Supabase
     let paymentsToSave = [];
     
-    if (parcelas && parcelas > 1 && paymentData.installment) {
-      // Fetch all installments
+    if (isInstallment && paymentData.installment) {
+      // Condição B: Salvar todas as parcelas geradas com o ID do pacote (installment)
       const installmentId = paymentData.installment;
+      
+      // Buscar todas as cobranças geradas para este parcelamento no Asaas
       const installmentsRes = await fetch(`https://sandbox.asaas.com/api/v3/payments?installment=${installmentId}`, {
         method: 'GET',
         headers: {
@@ -192,7 +198,7 @@ app.post('/api/gerar_cobranca', async (req, res) => {
           aluno_id: aluno_id,
           asaas_customer_id: customerId,
           asaas_payment_id: p.id,
-          installment: installmentId,
+          installment: installmentId, // Obrigatoriamente preenchido com o ID do pacote
           valor: p.value,
           vencimento: p.dueDate,
           link_boleto: p.bankSlipUrl
@@ -202,11 +208,12 @@ app.post('/api/gerar_cobranca', async (req, res) => {
         throw new Error('Falha ao buscar parcelas do Asaas');
       }
     } else {
+       // Condição A: Salvar cobrança avulsa com installment nulo
        paymentsToSave = [{
           aluno_id: aluno_id,
           asaas_customer_id: customerId,
           asaas_payment_id: paymentData.id,
-          installment: paymentData.installment || null,
+          installment: null, // Obrigatoriamente nulo
           valor: paymentData.value || valor,
           vencimento: paymentData.dueDate || vencimento,
           link_boleto: paymentData.bankSlipUrl
@@ -303,6 +310,75 @@ app.post('/api/excluir_cobranca', async (req, res) => {
 });
 
 // Buscar Carnê (Payment Book) do Aluno
+app.get('/api/parcelamentos/:id/carne', async (req, res) => {
+  try {
+    const installmentId = req.params.id;
+
+    console.log(`Buscando carnê para o installment: ${installmentId}`);
+
+    // 1. Buscar detalhes do parcelamento no Asaas
+    const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${installmentId}`, {
+      method: 'GET',
+      headers: {
+        'access_token': process.env.ASAAS_API_KEY
+      }
+    });
+
+    if (!installmentRes.ok) {
+      const errorData = await installmentRes.json();
+      console.error(`Erro ao buscar installment ${installmentId} no Asaas:`, errorData);
+      return res.status(500).json({ error: 'Erro ao buscar dados do carnê no Asaas.' });
+    }
+
+    const installmentData = await installmentRes.json();
+    console.log('Resposta do Asaas ao buscar o Installment:', installmentData);
+    
+    if (installmentData.paymentBookUrl) {
+      console.log(`URL do carnê encontrada: ${installmentData.paymentBookUrl}`);
+      return res.status(200).json({ url: installmentData.paymentBookUrl });
+    } else {
+      console.log(`Installment ${installmentId} não possui paymentBookUrl. Acionando Plano B (buscando parcelas).`);
+      
+      // Plano B: Buscar todas as cobranças deste installment no Supabase
+      const { data: cobrancas, error: dbError } = await supabase
+        .from('alunos_cobrancas')
+        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status')
+        .eq('installment', installmentId)
+        .order('vencimento', { ascending: true });
+
+      if (dbError) {
+        console.error('Erro ao buscar parcelas no Supabase:', dbError);
+        return res.status(500).json({ error: 'Erro ao buscar parcelas do carnê.' });
+      }
+
+      if (!cobrancas || cobrancas.length === 0) {
+        return res.status(404).json({ error: 'Nenhuma parcela encontrada para este carnê.' });
+      }
+
+      // Format the response for the frontend modal
+      const parcelas = cobrancas.map((c, index) => ({
+        id: c.id,
+        numero: index + 1,
+        vencimento: c.vencimento,
+        valor: c.valor,
+        linkBoleto: c.link_boleto,
+        status: c.status
+      }));
+
+      return res.status(200).json({ 
+        fallback: true, 
+        parcelas,
+        message: 'Link único do carnê indisponível. Utilize os boletos individuais.'
+      });
+    }
+
+  } catch (error) {
+    console.error('Erro ao buscar carnê:', error);
+    return res.status(500).json({ error: 'Erro interno ao processar o carnê.' });
+  }
+});
+
+// Rota antiga mantida para compatibilidade (se necessário)
 app.get('/api/alunos/:id/carne', async (req, res) => {
   try {
     const alunoId = req.params.id;
@@ -353,8 +429,39 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
       console.log(`URL do carnê encontrada: ${installmentData.paymentBookUrl}`);
       return res.status(200).json({ url: installmentData.paymentBookUrl });
     } else {
-      console.log(`Installment ${installmentId} não possui paymentBookUrl.`);
-      return res.status(404).json({ error: 'Link do carnê não disponível para este parcelamento.' });
+      console.log(`Installment ${installmentId} não possui paymentBookUrl. Acionando Plano B (buscando parcelas).`);
+      
+      // Plano B: Buscar todas as cobranças deste installment no Supabase
+      const { data: parcelasData, error: parcelasError } = await supabase
+        .from('alunos_cobrancas')
+        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status')
+        .eq('installment', installmentId)
+        .order('vencimento', { ascending: true });
+
+      if (parcelasError) {
+        console.error('Erro ao buscar parcelas no Supabase:', parcelasError);
+        return res.status(500).json({ error: 'Erro ao buscar parcelas do carnê.' });
+      }
+
+      if (!parcelasData || parcelasData.length === 0) {
+        return res.status(404).json({ error: 'Nenhuma parcela encontrada para este carnê.' });
+      }
+
+      // Format the response for the frontend modal
+      const parcelas = parcelasData.map((c, index) => ({
+        id: c.id,
+        numero: index + 1,
+        vencimento: c.vencimento,
+        valor: c.valor,
+        linkBoleto: c.link_boleto,
+        status: c.status
+      }));
+
+      return res.status(200).json({ 
+        fallback: true, 
+        parcelas,
+        message: 'Link único do carnê indisponível. Utilize os boletos individuais.'
+      });
     }
 
   } catch (error) {

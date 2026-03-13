@@ -76,6 +76,7 @@ export interface Payment {
   description?: string;
   asaasPaymentId?: string;
   asaasPaymentUrl?: string;
+  installmentId?: string;
 }
 
 export interface Contract {
