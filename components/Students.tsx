@@ -4,7 +4,7 @@ import { dbService } from '../services/dbService';
 import { addHeader, pdfService } from '../services/pdfService';
 import { useDialog } from '../DialogContext';
 import { compressImage } from '../services/imageService';
-import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen, Barcode, Receipt } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen, Barcode, Receipt, RefreshCw } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -29,6 +29,10 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   const [selectedPayments, setSelectedPayments] = useState<string[]>([]);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
   const [showDeleteBatchModal, setShowDeleteBatchModal] = useState(false);
+  const [showFallbackModal, setShowFallbackModal] = useState(false);
+  const [fallbackInstallments, setFallbackInstallments] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'active' | 'cancelled'>('active');
+  const [cancellationReason, setCancellationReason] = useState('');
   
   // Form State
   const [formData, setFormData] = useState<Partial<Student>>({
@@ -318,9 +322,18 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
       const response = await fetch(`/api/alunos/${studentId}/carne`);
       const result = await response.json();
 
-      if (response.ok && result.url) {
-        window.open(result.url, '_blank');
-        showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+      if (response.ok) {
+        if (result.type === 'fallback') {
+          setFallbackInstallments(result.boletos);
+          setShowFallbackModal(true);
+          showAlert('Atenção', result.message, 'info');
+        } else if (result.type === 'pdf' && result.url) {
+          window.open(result.url, '_blank', 'noopener,noreferrer');
+          showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+        } else if (result.url) {
+          window.open(result.url, '_blank', 'noopener,noreferrer');
+          showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+        }
       } else {
         // O backend agora retorna 400 com mensagem específica se não for parcelamento
         showAlert('Atenção', result.error || 'Não foi possível encontrar o carnê deste aluno.', response.status === 400 ? 'warning' : 'error');
@@ -784,29 +797,63 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     closeModal();
   };
 
-  const handleDelete = (id: string) => {
-    showConfirm(
-      'Excluir Aluno', 
-      'Tem certeza que deseja excluir este aluno?',
-      () => {
-        const updatedStudents = data.students.filter(s => s.id !== id);
-        updateData({ students: updatedStudents });
-        dbService.saveData({ ...data, students: updatedStudents });
-      }
-    );
+  const handleDelete = (student: Student) => {
+    setShowDeleteModal(student);
+    setCancellationReason('');
   };
 
-  const handleCancelStudent = (student: Student) => {
+  const confirmCancellation = async (generatePDF: boolean) => {
+    if (!showDeleteModal) return;
+    if (!cancellationReason.trim()) {
+      showAlert('Atenção', 'Por favor, informe o motivo do cancelamento.', 'warning');
+      return;
+    }
+
+    const updatedStudents = data.students.map(s => 
+      s.id === showDeleteModal.id ? { ...s, status: 'cancelled' as const, cancellationReason } : s
+    );
+    
+    updateData({ students: updatedStudents });
+    dbService.saveData({ ...data, students: updatedStudents });
+    
+    if (generatePDF) {
+      await pdfService.generateCancellationTermPDF(showDeleteModal, data, cancellationReason);
+    }
+    
+    showAlert('Sucesso', 'Matrícula cancelada com sucesso.', 'success');
+    setShowDeleteModal(null);
+    setCancellationReason('');
+  };
+
+  const handleRematricular = async (student: Student) => {
     showConfirm(
-      'Cancelar Matrícula',
-      `Tem certeza que deseja cancelar a matrícula de ${student.name}? O histórico será mantido.`,
-      () => {
-        const updatedStudents = data.students.map(s => 
-          s.id === student.id ? { ...s, status: 'cancelled' as const } : s
-        );
-        updateData({ students: updatedStudents });
-        dbService.saveData({ ...data, students: updatedStudents });
-        showAlert('Sucesso', 'Matrícula cancelada com sucesso.', 'success');
+      'Rematricular Aluno',
+      `Deseja reativar a matrícula de ${student.name}?`,
+      async () => {
+        try {
+          // Faz a requisição para o backend (apenas para constar, pois o estado é gerenciado pelo dbService)
+          const response = await fetch(`/api/alunos/${student.id}/rematricular`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (!response.ok) {
+            throw new Error('Falha ao rematricular no servidor');
+          }
+
+          // Atualiza o estado local
+          const updatedStudents = data.students.map(s => 
+            s.id === student.id ? { ...s, status: 'active' as const, cancellationReason: undefined } : s
+          );
+          
+          updateData({ students: updatedStudents });
+          dbService.saveData({ ...data, students: updatedStudents });
+          
+          showAlert('Sucesso', 'Aluno rematriculado com sucesso.', 'success');
+        } catch (error) {
+          console.error('Erro ao rematricular:', error);
+          showAlert('Erro', 'Ocorreu um erro ao rematricular o aluno.', 'error');
+        }
       }
     );
   };
@@ -860,9 +907,11 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
     setShowModal(true);
   };
 
-  const filteredStudents = data.students.filter(s => 
-    (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase())
-  );
+  const filteredStudents = data.students.filter(s => {
+    const matchesSearch = (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
+    const matchesTab = activeTab === 'active' ? s.status !== 'cancelled' : s.status === 'cancelled';
+    return matchesSearch && matchesTab;
+  });
 
   const generatePDF = async () => {
     setIsGeneratingPDF(true);
@@ -899,6 +948,29 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
       </header>
 
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl space-y-6">
+        <div className="flex border-b border-slate-200">
+          <button
+            onClick={() => setActiveTab('active')}
+            className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${
+              activeTab === 'active' 
+                ? 'border-indigo-600 text-indigo-600' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Alunos Ativos
+          </button>
+          <button
+            onClick={() => setActiveTab('cancelled')}
+            className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${
+              activeTab === 'cancelled' 
+                ? 'border-indigo-600 text-indigo-600' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Alunos Cancelados
+          </button>
+        </div>
+
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
           <input 
@@ -925,7 +997,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
               {filteredStudents.map(student => {
                 const studentClass = data.classes.find(c => c.id === student.classId);
                 return (
-                  <tr key={student.id} className={`hover:bg-slate-50 transition-colors group ${student.status === 'cancelled' ? 'bg-slate-100/50' : ''}`}>
+                  <tr key={student.id} className={`hover:bg-slate-50 transition-colors group ${student.status === 'cancelled' ? 'bg-slate-50 opacity-60 grayscale' : ''}`}>
                     <td className="p-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
@@ -938,7 +1010,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                           )}
                         </div>
                         <div>
-                          <p className={`font-bold ${student.status === 'cancelled' ? 'text-slate-400' : 'text-slate-700'}`}>{student.name}</p>
+                          <p className={`font-bold ${student.status === 'cancelled' ? 'text-slate-500' : 'text-slate-700'}`}>{student.name}</p>
                           <p className="text-xs text-slate-500">{student.email}</p>
                         </div>
                       </div>
@@ -962,12 +1034,9 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setTransferringStudent(student)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Transferir Turma">
-                          <ArrowRightLeft size={18} />
-                        </button>
                         {student.status !== 'cancelled' && (
-                          <button onClick={() => handleCancelStudent(student)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors" title="Cancelar Matrícula">
-                            <UserX size={18} />
+                          <button onClick={() => setTransferringStudent(student)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Transferir Turma">
+                            <ArrowRightLeft size={18} />
                           </button>
                         )}
                         <button onClick={() => generateEnrollmentPDF(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Imprimir Ficha">
@@ -976,12 +1045,21 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                         <button onClick={() => setViewingStudentHistory(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Ver Histórico">
                           <Eye size={18} />
                         </button>
-                        <button onClick={() => openModal(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar">
-                          <Edit2 size={18} />
-                        </button>
-                        <button onClick={() => handleDelete(student.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
-                          <Trash2 size={18} />
-                        </button>
+                        {student.status === 'cancelled' && (
+                          <button onClick={() => handleRematricular(student)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Rematricular">
+                            <RefreshCw size={18} />
+                          </button>
+                        )}
+                        {student.status !== 'cancelled' && (
+                          <>
+                            <button onClick={() => openModal(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar">
+                              <Edit2 size={18} />
+                            </button>
+                            <button onClick={() => handleDelete(student)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Cancelar Matrícula">
+                              <Trash2 size={18} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1719,6 +1797,139 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
                   {isDeletingBatch ? 'Apagando...' : 'Sim, Apagar'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancellation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
+            <div className="bg-orange-500 h-1.5 w-full"></div>
+            <div className="p-8">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center shrink-0">
+                  <UserX size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-800">Cancelar Matrícula</h3>
+                  <p className="text-slate-500 text-sm">Cancelamento de {showDeleteModal.name}</p>
+                </div>
+              </div>
+              
+              <div className="space-y-4 mb-8">
+                <p className="text-slate-600 text-sm">
+                  O histórico do aluno será mantido, mas o status será alterado para <strong>Cancelado</strong>.
+                </p>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Motivo do Cancelamento *</label>
+                  <textarea
+                    value={cancellationReason}
+                    onChange={(e) => setCancellationReason(e.target.value)}
+                    className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[100px] resize-none"
+                    placeholder="Descreva o motivo do cancelamento..."
+                    required
+                  />
+                </div>
+              </div>
+              
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => confirmCancellation(true)}
+                  className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all flex items-center justify-center gap-2"
+                >
+                  <Printer size={18} />
+                  Imprimir Termo e Cancelar
+                </button>
+                <button 
+                  onClick={() => confirmCancellation(false)}
+                  className="w-full py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 shadow-lg shadow-orange-100 transition-all flex items-center justify-center gap-2"
+                >
+                  <CheckCircle size={18} />
+                  Apenas Cancelar Matrícula
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowDeleteModal(null);
+                    setCancellationReason('');
+                  }}
+                  className="w-full py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors mt-2"
+                >
+                  Voltar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FALLBACK CARNE MODAL */}
+      {showFallbackModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-xl w-full max-w-3xl shadow-2xl my-auto relative overflow-hidden animate-slide-up">
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div>
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Carnê Digital</h3>
+                <p className="text-sm text-slate-500 mt-1">O link único do carnê não está disponível. Você pode acessar os boletos individuais abaixo.</p>
+              </div>
+              <button onClick={() => setShowFallbackModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={24} /></button>
+            </div>
+            
+            <div className="p-8 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {fallbackInstallments.map((parcela) => (
+                  <div key={parcela.id} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="text-xs font-black text-indigo-500 uppercase tracking-wider">Parcela {parcela.numero}</div>
+                        <div className="text-lg font-bold text-slate-800 mt-0.5">R$ {parcela.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400 font-medium">Vencimento</div>
+                        <div className="text-sm font-bold text-slate-700">{new Date(parcela.vencimento).toLocaleDateString('pt-BR')}</div>
+                      </div>
+                    </div>
+                    
+                    <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                        parcela.status === 'paid' || parcela.status === 'received' || parcela.status === 'confirmed' ? 'text-emerald-600 bg-emerald-50' :
+                        parcela.status === 'overdue' ? 'text-red-600 bg-red-50' :
+                        'text-amber-600 bg-amber-50'
+                      }`}>
+                        {parcela.status === 'paid' || parcela.status === 'received' || parcela.status === 'confirmed' ? 'Pago' :
+                         parcela.status === 'overdue' ? 'Atrasado' : 'Pendente'}
+                      </span>
+                      
+                      {parcela.linkBoleto ? (
+                        <a 
+                          href={parcela.linkBoleto} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors inline-flex items-center gap-1.5"
+                        >
+                          <Barcode size={14} /> Abrir Boleto
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">Boleto indisponível</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button 
+                type="button" 
+                onClick={() => setShowFallbackModal(false)} 
+                className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors shadow-sm"
+              >
+                Fechar
+              </button>
             </div>
           </div>
         </div>

@@ -5,20 +5,32 @@ import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
 import sharp from 'sharp';
+import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+async function startServer() {
+  const app = express();
+  const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(cors());
+  app.use(express.json());
+  app.use(cors());
 
-// Supabase Setup
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+  // Supabase Setup
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseKey = process.env.VITE_SUPABASE_KEY;
+  let supabase = null;
+  
+  if (supabaseUrl && supabaseKey) {
+    try {
+      supabase = createClient(supabaseUrl, supabaseKey);
+    } catch (e) {
+      console.warn('Failed to initialize Supabase client:', e);
+    }
+  } else {
+    console.warn('Supabase credentials not found. Some API routes may fail.');
+  }
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -399,7 +411,7 @@ app.get('/api/parcelamentos/:id/carne', async (req, res) => {
       // Plano B: Buscar todas as cobranças deste installment no Supabase
       const { data: cobrancas, error: dbError } = await supabase
         .from('alunos_cobrancas')
-        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status')
+        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status, installment')
         .eq('installment', installmentId)
         .order('vencimento', { ascending: true });
 
@@ -419,7 +431,8 @@ app.get('/api/parcelamentos/:id/carne', async (req, res) => {
         vencimento: c.vencimento,
         valor: c.valor,
         linkBoleto: c.link_boleto,
-        status: c.status
+        status: c.status,
+        installment: c.installment
       }));
 
       return res.status(200).json({ 
@@ -448,7 +461,7 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
       .select('installment')
       .eq('aluno_id', alunoId)
       .not('installment', 'is', null)
-      .order('created_at', { ascending: false })
+      .order('vencimento', { ascending: false })
       .limit(1);
 
     if (dbError) {
@@ -492,7 +505,7 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
       // Plano B: Buscar todas as cobranças deste installment no Supabase
       const { data: parcelasData, error: parcelasError } = await supabase
         .from('alunos_cobrancas')
-        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status')
+        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status, installment')
         .eq('installment', installmentId)
         .order('vencimento', { ascending: true });
 
@@ -512,7 +525,8 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
         vencimento: c.vencimento,
         valor: c.valor,
         linkBoleto: c.link_boleto,
-        status: c.status
+        status: c.status,
+        installment: c.installment
       }));
 
       return res.status(200).json({ 
@@ -612,14 +626,38 @@ app.delete('/api/cobrancas/lote', async (req, res) => {
   }
 });
 
+app.patch('/api/alunos/:id/rematricular', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // In this architecture, the frontend syncs the entire state via dbService.
+    // This route serves as an acknowledgment for the re-enrollment action.
+    
+    res.json({ success: true, message: 'Aluno rematriculado com sucesso.' });
+  } catch (error) {
+    console.error('Erro ao rematricular aluno:', error);
+    res.status(500).json({ error: 'Erro interno ao rematricular aluno.' });
+  }
+});
+
 // Servir o Frontend
-app.use(express.static(path.join(__dirname, 'dist')));
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    // Fallback do React Router com Regex nativa
+    app.get(/.*/, (req, res) => {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+  }
 
-// Fallback do React Router com Regex nativa
-app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+  app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+  });
+}
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+startServer();

@@ -34,6 +34,7 @@ export interface Student {
   guardianBirthDate?: string; // Novo campo
   classId: string;
   status: 'active' | 'inactive' | 'cancelled';
+  cancellationReason?: string;
   registrationDate: string;
   photo?: string; // Base64 image
   faceDescriptor?: number[]; // Array of numbers for face recognition
