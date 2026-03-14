@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
 import sharp from 'sharp';
-import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -642,11 +641,16 @@ app.patch('/api/alunos/:id/rematricular', async (req, res) => {
 
 // Servir o Frontend
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.warn('Vite not found or failed to initialize. Skipping Vite middleware.', e);
+    }
   } else {
     app.use(express.static(path.join(__dirname, 'dist')));
     // Fallback do React Router com Regex nativa
