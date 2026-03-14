@@ -642,7 +642,7 @@ app.patch('/api/alunos/:id/rematricular', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Fallback do React Router
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
