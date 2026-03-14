@@ -9,14 +9,13 @@ import sharp from 'sharp';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function startServer() {
-  const app = express();
-  const PORT = process.env.PORT || 3000;
+const app = express();
+const PORT = process.env.PORT || 3001;
 
-  app.use(express.json());
-  app.use(cors());
+app.use(express.json());
+app.use(cors());
 
-  // Supabase Setup
+// Supabase Setup
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const supabaseKey = process.env.VITE_SUPABASE_KEY;
   let supabase = null;
@@ -639,29 +638,14 @@ app.patch('/api/alunos/:id/rematricular', async (req, res) => {
   }
 });
 
-// Servir o Frontend
-  if (process.env.NODE_ENV !== 'production') {
-    try {
-      const { createServer: createViteServer } = await import('vite');
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: 'spa',
-      });
-      app.use(vite.middlewares);
-    } catch (e) {
-      console.warn('Vite not found or failed to initialize. Skipping Vite middleware.', e);
-    }
-  } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    // Fallback do React Router com Regex nativa
-    app.get(/.*/, (req, res) => {
-        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    });
-  }
+// Servir arquivos estáticos do frontend em produção
+app.use(express.static(path.join(__dirname, 'dist')));
 
-  app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Servidor rodando na porta ${PORT}`);
-  });
-}
+// Fallback do React Router
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
 
-startServer();
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+});
