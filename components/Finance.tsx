@@ -121,7 +121,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     try {
       const { data: cloudPayments, error } = await supabase
         .from('alunos_cobrancas')
-        .select('asaas_payment_id, status, aluno_id, valor, vencimento, data_pagamento, installment, link_boleto');
+        .select('asaas_payment_id, status, aluno_id, valor, vencimento, data_pagamento, installment, asaas_installment_id, link_boleto');
 
       if (error) throw error;
 
@@ -144,14 +144,14 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                              statusStr === 'atrasado' ? 'overdue' : 
                              statusStr === 'cancelado' ? 'cancelled' : 'pending';
             
-            if (p.status !== newStatus || p.amount !== match.valor || p.installmentId !== match.installment || p.asaasPaymentUrl !== match.link_boleto || p.asaasPaymentId !== match.asaas_payment_id) {
+            if (p.status !== newStatus || p.amount !== match.valor || p.installmentId !== (match.asaas_installment_id || match.installment) || p.asaasPaymentUrl !== match.link_boleto || p.asaasPaymentId !== match.asaas_payment_id) {
               updatedCount++;
               return { 
                 ...p, 
                 status: newStatus as any, 
                 amount: match.valor,
                 paidDate: match.data_pagamento || p.paidDate,
-                installmentId: match.installment || p.installmentId,
+                installmentId: match.asaas_installment_id || match.installment || p.installmentId,
                 asaasPaymentUrl: match.link_boleto || p.asaasPaymentUrl,
                 asaasPaymentId: match.asaas_payment_id || p.asaasPaymentId
               };
