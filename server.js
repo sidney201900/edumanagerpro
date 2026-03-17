@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -11,45 +10,55 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
 app.use(cors());
 
 // Supabase Setup
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_KEY;
+const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://ekbuvcjsfcczviqqlfit.supabase.co';
+const supabaseKey = process.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrYnV2Y2pzZmNjenZpcXFsZml0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5OTU0MzIsImV4cCI6MjA4NjU3MTQzMn0.oIzBeGF-PjaviZejYb1TeOOEzMm-Jjth1XzvJrjD6us';
 let supabase = null;
 
-if (supabaseUrl && supabaseKey) {
+if (supabaseUrl && supabaseKey && supabaseUrl !== 'your_supabase_project_url') {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
   } catch (e) {
     console.warn('Failed to initialize Supabase client:', e);
   }
 } else {
-  console.warn('Supabase credentials not found. Some API routes may fail.');
+  console.warn('Supabase credentials not found or placeholder. Using fallback if available.');
 }
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 // Rota para upload e compressão da logo
 app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
   try {
+    if (!supabase) {
+      return res.status(500).json({ error: 'Serviço de armazenamento não configurado.' });
+    }
+
     if (!req.file) {
       return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
     }
 
     // Comprimir e converter para WebP
-    const compressedBuffer = await sharp(req.file.buffer)
-      .resize(500, 500, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 60 })
-      .toBuffer();
-
-    if (!supabase) {
-      // Fallback to base64 if Supabase is not configured
-      const base64 = `data:image/webp;base64,${compressedBuffer.toString('base64')}`;
-      return res.status(200).json({ url: base64 });
+    let compressedBuffer;
+    try {
+      compressedBuffer = await sharp(req.file.buffer)
+        .resize(500, 500, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 60 })
+        .toBuffer();
+    } catch (sharpError) {
+      console.error('Erro no processamento com Sharp:', sharpError);
+      // Fallback: usar o buffer original se o sharp falhar
+      compressedBuffer = req.file.buffer;
     }
 
     const fileName = `logo_${Date.now()}.webp`;
@@ -60,13 +69,19 @@ app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
       .from('edumanager-assets')
       .upload(filePath, compressedBuffer, {
         contentType: 'image/webp',
+        cacheControl: '3600',
         upsert: true
       });
 
     if (error) {
-      console.error('Erro no upload para o Supabase, usando base64 como fallback:', error);
-      const base64 = `data:image/webp;base64,${compressedBuffer.toString('base64')}`;
-      return res.status(200).json({ url: base64 });
+      console.error('Erro no upload para o Supabase:', error);
+      // Detailed error for debugging
+      const errorMsg = error.message || JSON.stringify(error);
+      return res.status(500).json({ 
+        error: 'Erro ao salvar a imagem no storage.',
+        details: errorMsg,
+        bucket: 'edumanager-assets'
+      });
     }
 
     // Obter URL pública
@@ -647,27 +662,14 @@ app.patch('/api/alunos/:id/rematricular', async (req, res) => {
   }
 });
 
-// ============================================================
-// Lógica de Inicialização (Desenvolvimento vs Produção)
-// ============================================================
-const isProd = process.env.NODE_ENV === 'production';
+// Servir arquivos estáticos do frontend em produção
+app.use(express.static(path.join(__dirname, 'dist')));
 
-if (!isProd) {
-  // Modo Desenvolvimento (AI Studio Preview)
-  const { createServer: createViteServer } = await import('vite');
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa'
-  });
-  app.use(vite.middlewares);
-} else {
-  // Modo Produção (Portainer / Servidor Real)
-  app.use(express.static(path.join(__dirname, 'dist')));
-  app.get('*', (req, res) => {
+// Fallback do React Router
+app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-  });
-}
+});
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
