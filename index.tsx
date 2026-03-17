@@ -99,7 +99,7 @@ const App = () => {
 
   // 3. Dynamic Favicon
   useEffect(() => {
-    const logoUrl = data.profile?.logo;
+    const logoUrl = data.logo;
     if (logoUrl) {
       let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
       if (!link) {
@@ -110,7 +110,7 @@ const App = () => {
       }
       link.href = logoUrl;
     }
-  }, [data.profile?.logo]);
+  }, [data.logo]);
 
   const updateData = (newData: Partial<SchoolData>) => {
     setData(prev => ({ 
@@ -180,7 +180,7 @@ const App = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50 relative">
-      <Sidebar currentView={currentView} setView={setCurrentView} user={currentUser} logo={data.profile.logo} />
+      <Sidebar currentView={currentView} setView={setCurrentView} user={currentUser} logo={data.logo} />
       <main className="flex-1 w-full overflow-y-auto max-h-screen pt-16 md:pt-0 relative">
         {/* Sync Indicator - Green Strip on the Right */}
         {syncStatus === 'syncing' && (

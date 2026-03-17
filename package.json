@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node server.js",
     "build": "vite build",
     "start": "node server.js",
     "preview": "vite preview",
@@ -16,6 +16,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "browser-image-compression": "^2.0.2",
     "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",

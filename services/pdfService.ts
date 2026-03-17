@@ -23,7 +23,11 @@ const addImageProportional = async (doc: any, src: string, x: number, y: number,
     const offsetX = (maxW - finalW) / 2;
     const offsetY = (maxH - finalH) / 2;
     
-    const format = src.toLowerCase().includes('png') ? 'PNG' : 'JPEG';
+    let format = 'JPEG';
+    const lowerSrc = src.toLowerCase();
+    if (lowerSrc.includes('png')) format = 'PNG';
+    else if (lowerSrc.includes('webp')) format = 'WEBP';
+    
     doc.addImage(src, format, x + offsetX, y + offsetY, finalW, finalH, undefined, 'FAST');
     return { width: finalW, height: finalH };
   } catch (e) {
@@ -90,8 +94,8 @@ const addStudentPhoto3x4 = async (doc: any, src: string, x: number, y: number) =
 export const addHeader = async (doc: any, schoolData: SchoolData) => {
   const profile = schoolData.profile;
   
-  if (profile.logo) {
-    await addImageProportional(doc, profile.logo, 20, 10, 25, 25);
+  if (schoolData.logo) {
+    await addImageProportional(doc, schoolData.logo, 20, 10, 25, 25);
   }
 
   doc.setFontSize(12);
@@ -243,9 +247,9 @@ const addContractHeader = async (doc: any, schoolData: SchoolData) => {
   
   let currentY = 15; // 1.5cm top for header content
 
-  if (profile.logo) {
+  if (schoolData.logo) {
     // Center the logo, making it small (20x20)
-    await addImageProportional(doc, profile.logo, centerX - 10, currentY, 20, 20);
+    await addImageProportional(doc, schoolData.logo, centerX - 10, currentY, 20, 20);
     currentY += 22;
   }
 
@@ -597,8 +601,8 @@ export const pdfService = {
     doc.rect(10, 10, 190, 140); // Border
 
     const profile = schoolData.profile;
-    if (profile.logo) {
-       await addImageProportional(doc, profile.logo, 20, 15, 20, 20);
+    if (schoolData.logo) {
+       await addImageProportional(doc, schoolData.logo, 20, 15, 20, 20);
     }
     doc.setFontSize(12);
     doc.setTextColor(0);

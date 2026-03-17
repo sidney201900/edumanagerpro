@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { SchoolData, SchoolProfile } from '../types';
 import { dbService } from '../services/dbService';
-import { Download, Upload, Trash2, Database, School, Camera, FileText, Info, AlertTriangle, X, CheckCircle, AlertCircle, Cloud, HelpCircle, RefreshCw } from 'lucide-react';
+import { Download, Upload, Trash2, Database, School, Camera, FileText, Info, AlertTriangle, X, CheckCircle, AlertCircle, Cloud, HelpCircle, RefreshCw, Plus } from 'lucide-react';
 import { isSupabaseConfigured } from '../services/supabase';
 import { useDialog } from '../DialogContext';
 
@@ -15,26 +15,144 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({ data, updateData, setData }) => {
   const { showAlert, showConfirm } = useDialog();
-  const [profile, setProfile] = useState<SchoolProfile>({
-    name: data.profile.name || '',
-    address: data.profile.address || '',
-    cnpj: data.profile.cnpj || '',
-    phone: data.profile.phone || '',
-    email: data.profile.email || '',
-    logo: data.profile.logo || ''
-  });
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(data.profile.id || 'main-school');
+  const [profiles, setProfiles] = useState<SchoolProfile[]>(data.profiles || [data.profile]);
+  const [globalLogo, setGlobalLogo] = useState<string>(data.logo || '');
   
-  const supabaseConfigured = useMemo(() => isSupabaseConfigured(), []);
-  
-  // Custom modal states
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
+  const currentProfile = profiles.find(p => p.id === selectedProfileId) || profiles[0];
+
+  const [profileForm, setProfileForm] = useState<SchoolProfile>(currentProfile);
+
+  React.useEffect(() => {
+    setProfileForm(currentProfile);
+  }, [selectedProfileId, profiles]);
+
+  React.useEffect(() => {
+    setGlobalLogo(data.logo || '');
+  }, [data.logo]);
+
+  const validateCNPJ = (cnpj: string) => {
+    cnpj = cnpj.replace(/[^\d]+/g, '');
+    if (cnpj === '' || cnpj.length !== 14) return false;
+    if (/^(\d)\1+$/.test(cnpj)) return false;
+    
+    let tamanho = cnpj.length - 2;
+    let numeros = cnpj.substring(0, tamanho);
+    let digitos = cnpj.substring(tamanho);
+    let soma = 0;
+    let pos = tamanho - 7;
+    for (let i = tamanho; i >= 1; i--) {
+      soma += parseInt(numeros.charAt(tamanho - i)) * pos--;
+      if (pos < 2) pos = 9;
+    }
+    let resultado = soma % 11 < 2 ? 0 : 11 - (soma % 11);
+    if (resultado !== parseInt(digitos.charAt(0))) return false;
+    
+    tamanho = tamanho + 1;
+    numeros = cnpj.substring(0, tamanho);
+    soma = 0;
+    pos = tamanho - 7;
+    for (let i = tamanho; i >= 1; i--) {
+      soma += parseInt(numeros.charAt(tamanho - i)) * pos--;
+      if (pos < 2) pos = 9;
+    }
+    resultado = soma % 11 < 2 ? 0 : 11 - (soma % 11);
+    if (resultado !== parseInt(digitos.charAt(1))) return false;
+    
+    return true;
+  };
+
+  const handleZipChange = async (zip: string) => {
+    const cleanZip = zip.replace(/\D/g, '');
+    setProfileForm(prev => ({ ...prev, zip: zip.replace(/^(\d{5})(\d)/, '$1-$2').slice(0, 9) }));
+    
+    if (cleanZip.length === 8) {
+      try {
+        const response = await fetch(`https://viacep.com.br/ws/${cleanZip}/json/`);
+        const data = await response.json();
+        if (!data.erro) {
+          setProfileForm(prev => ({
+            ...prev,
+            address: data.logradouro,
+            city: data.localidade,
+            state: data.uf
+          }));
+        }
+      } catch (error) {
+        console.error('Erro ao buscar CEP:', error);
+      }
+    }
+  };
 
   const saveProfile = () => {
-    updateData({ profile });
+    if (!validateCNPJ(profileForm.cnpj)) {
+      showAlert('Erro', 'CNPJ inválido. Por favor, insira um CNPJ verdadeiro.', 'error');
+      return;
+    }
+
+    // Check if trying to set as Matriz but another Matriz already exists
+    if (profileForm.type === 'matriz') {
+      const otherMatriz = profiles.find(p => p.type === 'matriz' && p.id !== profileForm.id);
+      if (otherMatriz) {
+        showAlert('Erro', `Já existe uma matriz cadastrada (${otherMatriz.name}). Só é permitida uma matriz.`, 'error');
+        return;
+      }
+    }
+
+    const updatedProfiles = profiles.map(p => p.id === profileForm.id ? profileForm : p);
+    const mainProfile = updatedProfiles.find(p => p.type === 'matriz') || updatedProfiles[0];
+    
+    setProfiles(updatedProfiles);
+    updateData({ profiles: updatedProfiles, profile: mainProfile });
     showAlert('Sucesso', 'Configurações salvas com sucesso!', 'success');
   };
+
+  const addNewInstitution = () => {
+    const newId = `school-${Date.now()}`;
+    const newProfile: SchoolProfile = {
+      id: newId,
+      name: 'Nova Instituição',
+      address: '',
+      city: '',
+      state: '',
+      zip: '',
+      cnpj: '',
+      phone: '',
+      email: '',
+      type: 'filial'
+    };
+    setProfiles([...profiles, newProfile]);
+    setSelectedProfileId(newId);
+  };
+
+  const deleteInstitution = (id: string) => {
+    if (profiles.length <= 1) {
+      showAlert('Erro', 'É necessário ter pelo menos uma instituição cadastrada.', 'error');
+      return;
+    }
+    
+    const profileToDelete = profiles.find(p => p.id === id);
+    if (profileToDelete?.type === 'matriz') {
+      showAlert('Erro', 'Não é possível excluir a instituição matriz. Altere outra para matriz primeiro.', 'error');
+      return;
+    }
+
+    showConfirm(
+      'Excluir Instituição?',
+      `Tem certeza que deseja excluir a instituição "${profileToDelete?.name}"?`,
+      () => {
+        const updatedProfiles = profiles.filter(p => p.id !== id);
+        setProfiles(updatedProfiles);
+        setSelectedProfileId(updatedProfiles[0].id);
+        updateData({ profiles: updatedProfiles, profile: updatedProfiles[0] });
+      }
+    );
+  };
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const supabaseConfigured = useMemo(() => isSupabaseConfigured(), []);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
 
   const downloadSupabaseSQL = () => {
     const sql = `-- Create the table for storing the entire application state as a JSON blob
@@ -100,8 +218,9 @@ using (true);`;
           throw new Error('Falha no upload da logo');
         }
 
-        const data = await response.json();
-        setProfile(prev => ({ ...prev, logo: data.url }));
+        const dataResponse = await response.json();
+        setGlobalLogo(dataResponse.url);
+        updateData({ logo: dataResponse.url });
         showAlert('Sucesso', 'Logo atualizada com sucesso!', 'success');
       } catch (error) {
         console.error('Erro ao fazer upload da imagem:', error);
@@ -157,22 +276,56 @@ using (true);`;
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-xl space-y-6">
-            <div className="flex items-center gap-3 text-indigo-600">
-              <div className="p-3 bg-indigo-50 rounded-lg">
-                <School size={24} />
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3 text-indigo-600">
+                <div className="p-3 bg-indigo-50 rounded-lg">
+                  <School size={24} />
+                </div>
+                <h3 className="text-xl font-black text-slate-800">Perfil da Instituição</h3>
               </div>
-              <h3 className="text-xl font-black text-slate-800">Perfil da Instituição</h3>
+              <button 
+                onClick={addNewInstitution}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-bold text-xs shadow-md"
+              >
+                <Plus size={16} /> Nova Instituição
+              </button>
+            </div>
+
+            {/* Institution Selector */}
+            <div className="flex flex-wrap gap-2 mb-6">
+              {profiles.map(p => (
+                <div key={p.id} className="flex items-center">
+                  <button
+                    onClick={() => setSelectedProfileId(p.id)}
+                    className={`px-4 py-2 rounded-lg font-bold text-xs transition-all border ${
+                      selectedProfileId === p.id 
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' 
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                    }`}
+                  >
+                    {p.name} {p.type === 'matriz' && '(Matriz)'}
+                  </button>
+                  {p.id !== selectedProfileId && p.type !== 'matriz' && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); deleteInstitution(p.id); }}
+                      className="ml-1 p-1 text-red-400 hover:text-red-600 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
 
             <div className="flex flex-col md:flex-row gap-8">
               <div className="flex flex-col items-center gap-4">
                 <div className="w-40 h-40 rounded-xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group shadow-inner">
-                  {profile.logo ? (
-                    <img src={profile.logo} alt="Logo" className="w-full h-full object-contain p-2" />
+                  {globalLogo ? (
+                    <img src={globalLogo} alt="Logo" className="w-full h-full object-contain p-2" />
                   ) : (
                     <div className="text-slate-300 text-center p-4">
                       <Camera size={40} className="mx-auto mb-2 opacity-20" />
-                      <span className="text-[10px] font-bold uppercase text-slate-500">Logo da Escola</span>
+                      <span className="text-[10px] font-bold uppercase text-slate-500">Logo Global</span>
                     </div>
                   )}
                   <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white">
@@ -180,31 +333,62 @@ using (true);`;
                     <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
                   </label>
                 </div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase text-center">Logo única para todas as unidades</p>
               </div>
 
               <div className="flex-1 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Nome da Escola</label>
-                    <input className={inputClass} value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} />
+                    <input className={inputClass} value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">CNPJ</label>
-                    <input className={inputClass} placeholder="00.000.000/0001-00" value={profile.cnpj} onChange={e => setProfile({...profile, cnpj: e.target.value})} />
+                    <input className={inputClass} placeholder="00.000.000/0001-00" value={profileForm.cnpj} onChange={e => setProfileForm({...profileForm, cnpj: e.target.value})} />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Endereço Completo</label>
-                  <input className={inputClass} value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} />
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">CEP</label>
+                    <input className={inputClass} placeholder="00000-000" value={profileForm.zip} onChange={e => handleZipChange(e.target.value)} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Endereço</label>
+                    <input className={inputClass} value={profileForm.address} onChange={e => setProfileForm({...profileForm, address: e.target.value})} />
+                  </div>
                 </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Cidade</label>
+                    <input className={inputClass} value={profileForm.city} onChange={e => setProfileForm({...profileForm, city: e.target.value})} />
+                  </div>
+                  <div className="md:col-span-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Estado (UF)</label>
+                    <input className={inputClass} placeholder="UF" value={profileForm.state} onChange={e => setProfileForm({...profileForm, state: e.target.value.toUpperCase().slice(0, 2)})} />
+                  </div>
+                  <div className="md:col-span-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Tipo</label>
+                    <select 
+                      className={inputClass} 
+                      value={profileForm.type} 
+                      onChange={e => setProfileForm({...profileForm, type: e.target.value as 'matriz' | 'filial'})}
+                    >
+                      <option value="matriz">Matriz</option>
+                      <option value="filial">Filial</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Telefone</label>
-                    <input className={inputClass} placeholder="(00) 0 0000-0000" value={profile.phone} onChange={e => setProfile({...profile, phone: formatPhone(e.target.value)})} maxLength={16} />
+                    <input className={inputClass} placeholder="(00) 0 0000-0000" value={profileForm.phone} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} maxLength={16} />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Email</label>
-                    <input className={inputClass} placeholder="Email" value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} />
+                    <input className={inputClass} placeholder="Email" value={profileForm.email} onChange={e => setProfileForm({...profileForm, email: e.target.value})} />
                   </div>
                 </div>
               </div>

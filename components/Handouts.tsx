@@ -54,6 +54,45 @@ const Handouts: React.FC<HandoutsProps> = ({ data, updateData }) => {
     syncAsaasPayments();
   }, []);
 
+  // Auto-sync handout payment status with Finance payments
+  React.useEffect(() => {
+    if (!data.payments || !data.handoutDeliveries) return;
+
+    const currentDeliveries = data.handoutDeliveries;
+    const currentPayments = data.payments;
+    const currentHandouts = data.handouts || [];
+
+    const updatedDeliveries = currentDeliveries.map(delivery => {
+      if (delivery.paymentStatus === 'pending') {
+        const handout = currentHandouts.find(h => h.id === delivery.handoutId);
+        const isPaidInFinance = currentPayments.some(p => 
+          p.studentId === delivery.studentId && 
+          p.status === 'paid' && 
+          (
+            (delivery.asaasPaymentId && p.asaasPaymentId === delivery.asaasPaymentId) ||
+            (handout && p.description && p.description.includes(handout.name))
+          )
+        );
+
+        if (isPaidInFinance) {
+          return {
+            ...delivery,
+            paymentStatus: 'paid' as const,
+            paymentDate: delivery.paymentDate || new Date().toISOString()
+          };
+        }
+      }
+      return delivery;
+    });
+
+    const hasChanges = updatedDeliveries.some((d, i) => d.paymentStatus !== currentDeliveries[i].paymentStatus);
+
+    if (hasChanges) {
+      updateData({ handoutDeliveries: updatedDeliveries });
+      dbService.saveData({ ...data, handoutDeliveries: updatedDeliveries });
+    }
+  }, [data.payments, data.handoutDeliveries, data.handouts, updateData, data]);
+
   const syncAsaasPayments = async () => {
     if (!isSupabaseConfigured() || isSyncing) return;
     

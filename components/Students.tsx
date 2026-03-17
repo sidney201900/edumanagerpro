@@ -4,7 +4,7 @@ import { dbService } from '../services/dbService';
 import { addHeader, pdfService } from '../services/pdfService';
 import { useDialog } from '../DialogContext';
 import { compressImage } from '../services/imageService';
-import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen, Barcode, Receipt, RefreshCw } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, User, Camera, Upload, X, CheckCircle, Loader2, Save, Image as ImageIcon, SwitchCamera, FileDown, Eye, FileText, AlertCircle, ArrowRightLeft, UserX, Printer, BookOpen, Barcode, Receipt, RefreshCw, ArrowLeft, Users } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -33,6 +33,7 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   const [fallbackInstallments, setFallbackInstallments] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'active' | 'cancelled'>('active');
   const [cancellationReason, setCancellationReason] = useState('');
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   
   // Form State
   const [formData, setFormData] = useState<Partial<Student>>({
@@ -908,9 +909,12 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
   };
 
   const filteredStudents = data.students.filter(s => {
-    const matchesSearch = (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
+    const matchesSearch = (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
+                         (s.cpf || '').includes(searchTerm) ||
+                         (s.email || '').toLowerCase().includes((searchTerm || '').toLowerCase());
     const matchesTab = activeTab === 'active' ? s.status !== 'cancelled' : s.status === 'cancelled';
-    return matchesSearch && matchesTab;
+    const matchesClass = selectedClassId ? (selectedClassId === 'none' ? !s.classId : s.classId === selectedClassId) : true;
+    return matchesSearch && matchesTab && matchesClass;
   });
 
   const generatePDF = async () => {
@@ -950,7 +954,10 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl space-y-6">
         <div className="flex border-b border-slate-200">
           <button
-            onClick={() => setActiveTab('active')}
+            onClick={() => {
+              setActiveTab('active');
+              setSelectedClassId(null);
+            }}
             className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${
               activeTab === 'active' 
                 ? 'border-indigo-600 text-indigo-600' 
@@ -960,7 +967,10 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
             Alunos Ativos
           </button>
           <button
-            onClick={() => setActiveTab('cancelled')}
+            onClick={() => {
+              setActiveTab('cancelled');
+              setSelectedClassId(null);
+            }}
             className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${
               activeTab === 'cancelled' 
                 ? 'border-indigo-600 text-indigo-600' 
@@ -978,96 +988,178 @@ const Students: React.FC<StudentsProps> = ({ data, updateData }) => {
             placeholder="Buscar alunos..." 
             className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              if (e.target.value) setSelectedClassId(null);
+            }}
           />
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs uppercase text-slate-500 font-bold tracking-wider">
-                <th className="p-4">Aluno</th>
-                <th className="p-4">Turma</th>
-                <th className="p-4">Status</th>
-                <th className="p-4">Face ID</th>
-                <th className="p-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm divide-y divide-slate-50">
-              {filteredStudents.map(student => {
-                const studentClass = data.classes.find(c => c.id === student.classId);
-                return (
-                  <tr key={student.id} className={`hover:bg-slate-50 transition-colors group ${student.status === 'cancelled' ? 'bg-slate-50 opacity-60 grayscale' : ''}`}>
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
-                          {student.photo ? (
-                            <img src={student.photo} alt={student.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-slate-400">
-                              <User size={20} />
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <p className={`font-bold ${student.status === 'cancelled' ? 'text-slate-500' : 'text-slate-700'}`}>{student.name}</p>
-                          <p className="text-xs text-slate-500">{student.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 text-slate-500">{studentClass?.name || '-'}</td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        student.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 
-                        student.status === 'cancelled' ? 'bg-slate-200 text-slate-600' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        {student.status === 'active' ? 'Ativo' : student.status === 'cancelled' ? 'Cancelado' : 'Inativo'}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      {student.faceDescriptor ? (
-                        <span className="text-emerald-500 flex items-center gap-1 font-bold text-xs"><CheckCircle size={14}/> OK</span>
-                      ) : (
-                        <span className="text-slate-400 text-xs">Pendente</span>
-                      )}
-                    </td>
-                    <td className="p-4 text-right">
-                      <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {student.status !== 'cancelled' && (
-                          <button onClick={() => setTransferringStudent(student)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Transferir Turma">
-                            <ArrowRightLeft size={18} />
-                          </button>
-                        )}
-                        <button onClick={() => generateEnrollmentPDF(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Imprimir Ficha">
-                          <FileText size={18} />
-                        </button>
-                        <button onClick={() => setViewingStudentHistory(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Ver Histórico">
-                          <Eye size={18} />
-                        </button>
-                        {student.status === 'cancelled' && (
-                          <button onClick={() => handleRematricular(student)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Rematricular">
-                            <RefreshCw size={18} />
-                          </button>
-                        )}
-                        {student.status !== 'cancelled' && (
-                          <>
-                            <button onClick={() => openModal(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar">
-                              <Edit2 size={18} />
-                            </button>
-                            <button onClick={() => handleDelete(student)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Cancelar Matrícula">
-                              <Trash2 size={18} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
+        {!selectedClassId && !searchTerm ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {data.classes.map(cls => {
+              const studentCount = data.students.filter(s => s.classId === cls.id && (activeTab === 'active' ? s.status !== 'cancelled' : s.status === 'cancelled')).length;
+              const course = data.courses.find(c => c.id === cls.courseId);
+              
+              return (
+                <button
+                  key={cls.id}
+                  onClick={() => setSelectedClassId(cls.id)}
+                  className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all text-left group"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="p-3 bg-indigo-50 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <Users size={24} />
+                    </div>
+                    <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold">
+                      {studentCount} Alunos
+                    </span>
+                  </div>
+                  <h4 className="text-lg font-black text-slate-800 mb-1">{cls.name}</h4>
+                  <p className="text-sm text-slate-500 mb-4">{course?.name || 'Curso não encontrado'}</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <User size={14} className="text-slate-400" />
+                      <span>Prof: {cls.teacher}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <BookOpen size={14} className="text-slate-400" />
+                      <span>{cls.schedule}</span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+            
+            {/* Card for students without class */}
+            {data.students.some(s => !s.classId && (activeTab === 'active' ? s.status !== 'cancelled' : s.status === 'cancelled')) && (
+              <button
+                onClick={() => setSelectedClassId('none')}
+                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all text-left group"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 bg-amber-50 rounded-xl text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                    <UserX size={24} />
+                  </div>
+                  <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold">
+                    {data.students.filter(s => !s.classId && (activeTab === 'active' ? s.status !== 'cancelled' : s.status === 'cancelled')).length} Alunos
+                  </span>
+                </div>
+                <h4 className="text-lg font-black text-slate-800 mb-1">Sem Turma</h4>
+                <p className="text-sm text-slate-500 mb-4">Alunos aguardando enturmação</p>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {(selectedClassId || searchTerm) && (
+              <div className="flex items-center justify-between">
+                <button 
+                  onClick={() => {
+                    setSelectedClassId(null);
+                    setSearchTerm('');
+                  }}
+                  className="flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors"
+                >
+                  <ArrowLeft size={20} />
+                  Voltar para Turmas
+                </button>
+                {selectedClassId && (
+                  <h4 className="text-lg font-black text-slate-800">
+                    {selectedClassId === 'none' ? 'Alunos Sem Turma' : data.classes.find(c => c.id === selectedClassId)?.name}
+                  </h4>
+                )}
+              </div>
+            )}
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 text-xs uppercase text-slate-500 font-bold tracking-wider">
+                    <th className="p-4">Aluno</th>
+                    <th className="p-4">Turma</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4">Face ID</th>
+                    <th className="p-4 text-right">Ações</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="text-sm divide-y divide-slate-50">
+                  {filteredStudents.map(student => {
+                    const studentClass = data.classes.find(c => c.id === student.classId);
+                    return (
+                      <tr key={student.id} className={`hover:bg-slate-50 transition-colors group ${student.status === 'cancelled' ? 'bg-slate-50 opacity-60 grayscale' : ''}`}>
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
+                              {student.photo ? (
+                                <img src={student.photo} alt={student.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-slate-400">
+                                  <User size={20} />
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <p className={`font-bold ${student.status === 'cancelled' ? 'text-slate-500' : 'text-slate-700'}`}>{student.name}</p>
+                              <p className="text-xs text-slate-500">{student.email}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4 text-slate-500">{studentClass?.name || '-'}</td>
+                        <td className="p-4">
+                          <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                            student.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 
+                            student.status === 'cancelled' ? 'bg-slate-200 text-slate-600' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {student.status === 'active' ? 'Ativo' : student.status === 'cancelled' ? 'Cancelado' : 'Inativo'}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          {student.faceDescriptor ? (
+                            <span className="text-emerald-500 flex items-center gap-1 font-bold text-xs"><CheckCircle size={14}/> OK</span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">Pendente</span>
+                          )}
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {student.status !== 'cancelled' && (
+                              <button onClick={() => setTransferringStudent(student)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Transferir Turma">
+                                <ArrowRightLeft size={18} />
+                              </button>
+                            )}
+                            <button onClick={() => generateEnrollmentPDF(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Imprimir Ficha">
+                              <FileText size={18} />
+                            </button>
+                            <button onClick={() => setViewingStudentHistory(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Ver Histórico">
+                              <Eye size={18} />
+                            </button>
+                            {student.status === 'cancelled' && (
+                              <button onClick={() => handleRematricular(student)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Rematricular">
+                                <RefreshCw size={18} />
+                              </button>
+                            )}
+                            {student.status !== 'cancelled' && (
+                              <>
+                                <button onClick={() => openModal(student)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar">
+                                  <Edit2 size={18} />
+                                </button>
+                                <button onClick={() => handleDelete(student)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Cancelar Matrícula">
+                                  <Trash2 size={18} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Enrollment Modal */}

@@ -89,12 +89,16 @@ export interface Contract {
 }
 
 export interface SchoolProfile {
+  id: string;
   name: string;
   address: string;
+  city: string;
+  state: string;
+  zip: string;
   cnpj: string;
   phone: string;
   email: string;
-  logo?: string; // Base64
+  type: 'matriz' | 'filial';
 }
 
 export interface ContractTemplate {
@@ -215,7 +219,9 @@ export interface SchoolData {
   handoutDeliveries?: HandoutDelivery[];
   employees?: Employee[];
   employeeCategories?: EmployeeCategory[];
+  profiles: SchoolProfile[];
   profile: SchoolProfile;
+  logo?: string;
   lastUpdated?: string;
 }
 

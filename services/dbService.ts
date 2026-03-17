@@ -34,12 +34,32 @@ const initialData: SchoolData = {
   employees: [],
   employeeCategories: [],
   profile: {
+    id: 'main-school',
     name: 'EduManager School',
     address: '',
+    city: '',
+    state: '',
+    zip: '',
     cnpj: '',
     phone: '',
     email: '',
+    type: 'matriz'
   },
+  logo: '',
+  profiles: [
+    {
+      id: 'main-school',
+      name: 'EduManager School',
+      address: '',
+      city: '',
+      state: '',
+      zip: '',
+      cnpj: '',
+      phone: '',
+      email: '',
+      type: 'matriz'
+    }
+  ],
   contractTemplates: [
     {
       id: 'default-template',
@@ -109,7 +129,9 @@ export const dbService = {
             ...defaultData,
             ...finalObj,
             users: users,
-            profile: { ...defaultData.profile, ...(finalObj.profile || {}) }
+            profile: { ...defaultData.profile, ...(finalObj.profile || {}) },
+            profiles: Array.isArray(finalObj.profiles) ? finalObj.profiles : (finalObj.profile ? [{ ...defaultData.profile, ...finalObj.profile }] : defaultData.profiles),
+            logo: finalObj.logo || finalObj.profile?.logo || ''
           };
 
           if (finalData.users.length === 0) {

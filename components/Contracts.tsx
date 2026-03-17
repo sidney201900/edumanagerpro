@@ -297,7 +297,7 @@ const Contracts: React.FC<ContractsProps> = ({ data, updateData }) => {
         <div className="p-6 border-b border-slate-100 bg-slate-50/30">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input type="text" placeholder={activeTab === 'contracts' ? "Buscar por título ou aluno..." : "Buscar por nome do modelo..."} className={inputClass} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <input type="text" placeholder={activeTab === 'contracts' ? "Buscar por título ou aluno..." : "Buscar por nome do modelo..."} className={`${inputClass} pl-12`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
         </div>
 

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -5,17 +6,19 @@ import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
 import sharp from 'sharp';
+import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const PORT = process.env.PORT || 3001;
+async function startServer() {
+  const app = express();
+  const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(cors());
+  app.use(express.json());
+  app.use(cors());
 
-// Supabase Setup
+  // Supabase Setup
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const supabaseKey = process.env.VITE_SUPABASE_KEY;
   let supabase = null;
@@ -30,10 +33,10 @@ app.use(cors());
     console.warn('Supabase credentials not found. Some API routes may fail.');
   }
 
-const upload = multer({ storage: multer.memoryStorage() });
+  const upload = multer({ storage: multer.memoryStorage() });
 
-// Rota para upload e compressão da logo
-app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
+  // Rota para upload e compressão da logo
+  app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
@@ -44,6 +47,12 @@ app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
       .resize(500, 500, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 60 })
       .toBuffer();
+
+    if (!supabase) {
+      // Fallback to base64 if Supabase is not configured
+      const base64 = `data:image/webp;base64,${compressedBuffer.toString('base64')}`;
+      return res.status(200).json({ url: base64 });
+    }
 
     const fileName = `logo_${Date.now()}.webp`;
     const filePath = `logos/${fileName}`;
@@ -57,8 +66,9 @@ app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
       });
 
     if (error) {
-      console.error('Erro no upload para o Supabase:', error);
-      return res.status(500).json({ error: 'Erro ao salvar a imagem no storage.' });
+      console.error('Erro no upload para o Supabase, usando base64 como fallback:', error);
+      const base64 = `data:image/webp;base64,${compressedBuffer.toString('base64')}`;
+      return res.status(200).json({ url: base64 });
     }
 
     // Obter URL pública
@@ -639,14 +649,26 @@ app.patch('/api/alunos/:id/rematricular', async (req, res) => {
   }
 });
 
-// Servir arquivos estáticos do frontend em produção
-app.use(express.static(path.join(__dirname, 'dist')));
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Servir arquivos estáticos do frontend em produção
+    app.use(express.static(path.join(__dirname, 'dist')));
+    
+    // Fallback do React Router
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+  }
 
-// Fallback do React Router
-app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+  app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+  });
+}
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+startServer();
