@@ -324,43 +324,66 @@ app.post('/api/gerar_cobranca', async (req, res) => {
   }
 });
 
-// 1. Excluir Cobrança (Inteligência Suprema)
+// Excluir Cobrança (Garante Exclusão no Asaas e no EduManager)
 app.post('/api/excluir_cobranca', async (req, res) => {
   try {
     const { id } = req.body;
     if (!id) return res.status(400).json({ error: 'ID não fornecido' });
 
-    // Acha TODAS as parcelas ligadas a esse ID (seja inst_, pay_ ou UUID)
-    const { data: parcelas } = await supabase.from('alunos_cobrancas').select('asaas_payment_id, asaas_installment_id').or(`installment.eq.${id},asaas_installment_id.eq.${id},asaas_payment_id.eq.${id},id.eq.${id}`);
+    console.log(`[Exclusão] Iniciando limpeza para o ID: ${id}`);
 
-    let instId = id.startsWith('inst_') ? id : null;
+    // 1. Busca TUDO no banco relacionado a esse ID
+    const { data: parcelas } = await supabase
+      .from('alunos_cobrancas')
+      .select('*')
+      .or(`installment.eq.${id},asaas_installment_id.eq.${id},asaas_payment_id.eq.${id},id.eq.${id}`);
 
-    // Limpa tudo no Asaas individualmente para não ser bloqueado
+    let instId = null;
+
+    // 2. Apaga CADA BOLETO individualmente no Asaas
     if (parcelas && parcelas.length > 0) {
       for (let p of parcelas) {
         if (p.asaas_payment_id && p.asaas_payment_id.startsWith('pay_')) {
-          await fetch(`https://sandbox.asaas.com/api/v3/payments/${p.asaas_payment_id}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+          console.log(`[Exclusão Asaas] Apagando parcela: ${p.asaas_payment_id}`);
+          await fetch(`https://sandbox.asaas.com/api/v3/payments/${p.asaas_payment_id}`, {
+            method: 'DELETE',
+            headers: { 'access_token': process.env.ASAAS_API_KEY }
+          }).catch(err => console.error('Erro no fetch do Asaas (parcela):', err.message));
         }
-        if (!instId && p.asaas_installment_id && p.asaas_installment_id.startsWith('inst_')) {
-          instId = p.asaas_installment_id;
+        if (!instId && (p.asaas_installment_id || p.installment)) {
+          instId = p.asaas_installment_id || p.installment;
         }
       }
     }
 
-    // Tenta excluir o carnê agrupado no Asaas
-    if (instId) {
-       await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
-    } else if (id.startsWith('inst_')) {
-       await fetch(`https://sandbox.asaas.com/api/v3/installments/${id}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+    // 3. Tenta apagar o Carnê (grupo) no Asaas
+    let asaasInstId = instId && instId.startsWith('inst_') ? instId : (id.startsWith('inst_') ? id : null);
+    if (asaasInstId) {
+      console.log(`[Exclusão Asaas] Apagando carnê: ${asaasInstId}`);
+      await fetch(`https://sandbox.asaas.com/api/v3/installments/${asaasInstId}`, {
+        method: 'DELETE',
+        headers: { 'access_token': process.env.ASAAS_API_KEY }
+      }).catch(err => console.error('Erro no fetch do Asaas (carnê):', err.message));
     } else if (id.startsWith('pay_')) {
-       await fetch(`https://sandbox.asaas.com/api/v3/payments/${id}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+      // Se a pessoa clicou numa avulsa que por acaso não estava no banco
+      await fetch(`https://sandbox.asaas.com/api/v3/payments/${id}`, {
+        method: 'DELETE',
+        headers: { 'access_token': process.env.ASAAS_API_KEY }
+      }).catch(() => {});
     }
 
-    // Passa o rodo no banco de dados local com segurança
-    await supabase.from('alunos_cobrancas').delete().or(`installment.eq.${id},asaas_installment_id.eq.${id},asaas_payment_id.eq.${id},id.eq.${id}`);
-    
-    return res.status(200).json({ message: 'Tudo excluído com sucesso (Asaas e Local).' });
-  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
+    // 4. Limpa TUDO no banco de dados do EduManager (Supabase)
+    console.log(`[Exclusão EduManager] Limpando banco de dados...`);
+    await supabase.from('alunos_cobrancas').delete().eq('installment', id);
+    await supabase.from('alunos_cobrancas').delete().eq('asaas_installment_id', id);
+    await supabase.from('alunos_cobrancas').delete().eq('asaas_payment_id', id);
+    await supabase.from('alunos_cobrancas').delete().eq('id', id);
+
+    return res.status(200).json({ message: 'Excluído com sucesso no EduManager e no Asaas!' });
+  } catch (error) {
+    console.error('[Exclusão] Erro fatal:', error);
+    return res.status(500).json({ error: 'Erro interno ao processar exclusão.' });
+  }
 });
 
 // 2. Buscar Carnê pelo Parcelamento (Botão da Tabela)

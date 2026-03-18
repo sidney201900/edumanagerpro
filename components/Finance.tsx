@@ -3,6 +3,7 @@ import { SchoolData, Payment, Student } from '../types';
 import { useDialog } from '../DialogContext';
 import SearchableSelect from './SearchableSelect';
 import { CheckCircle, Clock, AlertCircle, RefreshCw, Filter, DollarSign, Plus, X, Download, FileSignature, Printer, Tag, Hash, User, BookOpen, Trash2, Eye, Calendar, AlertTriangle, Barcode, Receipt, Layers, ChevronUp, ChevronDown } from 'lucide-react';
+import { pdfService } from '../services/pdfService';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
 interface FinanceProps {
@@ -542,9 +543,9 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
 
     if (!asaasIdToDelete) {
-      console.error('Falha ao extrair ID. Objeto paymentToDelete:', paymentToDelete);
-      showAlert('Erro', 'ID da cobrança não encontrado.', 'error');
-      return;
+      // Fallback para o ID local se não houver ID do Asaas (caso de erro de sincronia ou item manual)
+      asaasIdToDelete = paymentToDelete.id;
+      console.warn('Usando ID local como fallback para exclusão:', asaasIdToDelete);
     }
 
     try {
@@ -563,11 +564,23 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         // Update local state
         let updatedPayments = [...data.payments];
         if (asaasIdToDelete.startsWith('inst_')) {
-          updatedPayments = updatedPayments.filter(p => p.installmentId !== asaasIdToDelete);
+          updatedPayments = updatedPayments.filter(p => p.installmentId !== asaasIdToDelete && p.id !== asaasIdToDelete);
         } else {
-          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== asaasIdToDelete);
+          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== asaasIdToDelete && p.id !== asaasIdToDelete);
         }
-        updateData({ payments: updatedPayments });
+
+        // Também remover das entregas de apostilas se houver vínculo
+        const updatedDeliveries = (data.handoutDeliveries || []).map(d => {
+          if (d.asaasPaymentId === asaasIdToDelete || (asaasIdToDelete.startsWith('inst_') && updatedPayments.every(p => p.asaasPaymentId !== d.asaasPaymentId))) {
+            return { ...d, asaasPaymentId: undefined, asaasPaymentUrl: undefined, paymentStatus: 'pending' as const };
+          }
+          return d;
+        });
+
+        updateData({ 
+          payments: updatedPayments,
+          handoutDeliveries: updatedDeliveries
+        });
       } else {
         showAlert('Erro', result.error || 'Não é possível excluir uma cobrança já paga.', 'error');
       }
