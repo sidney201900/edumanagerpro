@@ -581,3 +581,547 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         paidDate.setHours(0,0,0,0);
         
         if (paidDate <= dueDate) {
+          return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pagamento em Dia</span>;
+        } else {
+          return <span className="inline-flex items-center gap-1 text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago com Atraso</span>;
+        }
+      }
+      return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago</span>;
+    }
+    
+    if (status === 'overdue' || status === 'atrasado') {
+      return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><AlertCircle size={12}/> Atrasado</span>;
+    }
+    
+    if (status === 'pending' || status === 'pendente' || !status) {
+      return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Clock size={12}/> Pendente</span>;
+    }
+    
+    if (status === 'cancelled' || status === 'cancelado') {
+      return <span className="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><X size={12}/> Cancelado</span>;
+    }
+    
+    return null;
+  };
+
+  const inputClass = "px-4 py-2 bg-white text-black border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm text-xs";
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Financeiro</h2>
+          <p className="text-slate-500 text-sm">Gestão de mensalidades vinculadas a contratos e cursos.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button 
+            onClick={() => setShowPrintCarneModal(true)}
+            className="flex-1 sm:flex-none bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-50 transition-all shadow-sm font-bold active:scale-95"
+          >
+            <Printer size={20} /> Imprimir Carnê
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex-1 sm:flex-none bg-indigo-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg font-bold active:scale-95"
+          >
+            <Plus size={20} /> Novo Lançamento
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden">
+        <div className="p-6 border-b border-slate-100 bg-slate-50/30 space-y-4">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                <Filter size={16} className="text-slate-400" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Visão:</span>
+              </div>
+              
+              <div className="flex gap-1.5">
+                {(['all', 'avulsas', 'parcelamentos'] as const).map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setFilterType(type)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                      filterType === type ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                    }`}
+                  >
+                    {type === 'all' ? 'Todas as Cobranças' : type === 'avulsas' ? 'Avulsas' : 'Parcelamentos (Carnês)'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                <Filter size={16} className="text-slate-400" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Status:</span>
+              </div>
+              
+              <div className="flex gap-1.5">
+                {(['all', 'pending', 'paid', 'overdue'] as const).map(status => (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                      filterStatus === status ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                    }`}
+                  >
+                    {status === 'all' ? 'Todos' : status === 'paid' ? 'Pagos' : status === 'pending' ? 'Pendentes' : 'Atrasados'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="relative">
+              <BookOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <select 
+                className={`${inputClass} w-full pl-9`}
+                value={filterClass}
+                onChange={e => {
+                  setFilterClass(e.target.value);
+                  setFilterStudent('all');
+                }}
+              >
+                <option value="all">Todas as Turmas</option>
+                {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="relative">
+              <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <select 
+                className={`${inputClass} w-full pl-9`}
+                value={filterStudent}
+                onChange={e => setFilterStudent(e.target.value)}
+              >
+                <option value="all">Todos os Alunos</option>
+                {data.students
+                  .filter(s => filterClass === 'all' || s.classId === filterClass)
+                  .map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase font-black tracking-[0.1em]">
+              <tr>
+                <th className="px-6 py-4">Aluno / Descrição</th>
+                <th className="px-6 py-4">Vencimento</th>
+                <th className="px-6 py-4">Valor</th>
+                <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4 text-right">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filterType === 'parcelamentos' ? (
+                groupedInstallments.map(group => {
+                  const student = data.students.find(s => s.id === group.studentId);
+                  const isExpanded = expandedInstallments.includes(group.installmentId);
+                  
+                  return (
+                    <React.Fragment key={group.installmentId}>
+                      <tr className="hover:bg-indigo-50/30 transition-colors group bg-slate-50/50">
+                        <td className="px-6 py-5">
+                          <div className="font-bold text-slate-900 flex items-center gap-2">
+                            {student?.name || 'Aluno Removido'}
+                          </div>
+                          <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide mt-1 flex items-center gap-1">
+                            <Layers size={12} />
+                            Carnê de {group.payments.length}x
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{group.description}</div>
+                        </td>
+                        <td className="px-6 py-5 text-slate-600 text-sm font-medium">
+                          {group.payments.length > 0 && (
+                            <>
+                              <span className="text-xs text-slate-400 block">Início: {new Date(group.payments[0].dueDate).toLocaleDateString('pt-BR')}</span>
+                              <span className="text-xs text-slate-400 block">Fim: {new Date(group.payments[group.payments.length - 1].dueDate).toLocaleDateString('pt-BR')}</span>
+                            </>
+                          )}
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="font-black text-slate-900">R$ {group.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                          <div className="text-[10px] text-slate-500 font-medium">Total do Carnê</div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-1 text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                            <Layers size={12}/> {group.payments.length} Parcelas
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 text-right flex justify-end gap-2">
+                          <button 
+                            onClick={() => toggleInstallment(group.installmentId)}
+                            className="px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors inline-flex items-center gap-1.5"
+                          >
+                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            {isExpanded ? 'Ocultar' : 'Ver Parcelas'}
+                          </button>
+                          <button 
+                            onClick={() => handleOpenPaymentLink(group.installmentId, 'carne')}
+                            className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors inline-flex items-center gap-1.5 border border-indigo-100"
+                          >
+                            <Printer size={14} /> Imprimir Carnê
+                          </button>
+                          <button onClick={() => openDelete({ ...group.payments[0], id: group.installmentId, installmentId: group.installmentId, asaasIdParaExcluir: group.installmentId } as any)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir Carnê Completo"><Trash2 size={18} /></button>
+                        </td>
+                      </tr>
+                      {isExpanded && group.payments.map(payment => (
+                        <tr key={payment.id} className="hover:bg-indigo-50/10 transition-colors bg-white">
+                          <td className="px-6 py-4 pl-12 relative">
+                            <div className="absolute left-6 top-0 bottom-0 w-px bg-slate-200"></div>
+                            <div className="absolute left-6 top-1/2 w-4 h-px bg-slate-200"></div>
+                            <div className="text-[10px] font-black text-slate-500 uppercase tracking-wide">
+                              Parcela {payment.installmentNumber}/{payment.totalInstallments}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-slate-600 text-sm font-medium">
+                            {new Date(payment.dueDate).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-slate-700">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                          </td>
+                          <td className="px-6 py-4">{getStatusBadge(payment)}</td>
+                          <td className="px-6 py-4 text-right flex justify-end gap-2">
+                            {payment.asaasPaymentId && (
+                              <>
+                                {(payment.status === 'pending' || payment.status === 'overdue') && (
+                                  <button 
+                                    onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')}
+                                    className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"
+                                  >
+                                    <Barcode size={12} /> Boleto
+                                  </button>
+                                )}
+                                {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
+                                  <button 
+                                    onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')}
+                                    className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"
+                                  >
+                                    <Receipt size={12} /> Recibo
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            <button onClick={() => openDelete(payment)} className="p-1.5 text-slate-400 hover:text-red-600 transition-all" title="Excluir Parcela"><Trash2 size={14} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })
+              ) : (
+                filteredPayments.map(payment => {
+                  const student = data.students.find(s => s.id === payment.studentId);
+                  return (
+                    <tr key={payment.id} className="hover:bg-indigo-50/30 transition-colors group">
+                      <td className="px-6 py-5">
+                        <div className="font-bold text-slate-900 flex items-center gap-2">
+                          {student?.name || 'Aluno Removido'}
+                          <button onClick={() => student && openHistory(student.id)} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Ver Histórico do Aluno">
+                            <Eye size={14} />
+                          </button>
+                        </div>
+                        <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide">
+                          {payment.type === 'registration' ? 'Matrícula' : 'Mensalidade'} 
+                          {payment.installmentNumber && <span> {payment.installmentNumber}/{payment.totalInstallments}</span>}
+                        </div>
+                        {payment.description && <div className="text-[10px] text-slate-400 mt-0.5">{payment.description}</div>}
+                      </td>
+                      <td className="px-6 py-5 text-slate-600 text-sm font-medium">
+                        {new Date(payment.dueDate).toLocaleDateString('pt-BR')}
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="font-black text-slate-900">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                        {payment.discount && payment.discount > 0 && (
+                          <div className="text-[10px] text-emerald-600 font-bold">- Desc: R$ {payment.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                        )}
+                      </td>
+                      <td className="px-6 py-5">{getStatusBadge(payment)}</td>
+                      <td className="px-6 py-5 text-right flex justify-end gap-2">
+                        {payment.asaasPaymentId && (
+                          <>
+                            {(payment.status === 'pending' || payment.status === 'overdue') && (
+                              <button 
+                                onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')}
+                                className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"
+                              >
+                                <Barcode size={14} /> Boleto
+                              </button>
+                            )}
+                            {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
+                              <button 
+                                onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')}
+                                className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"
+                              >
+                                <Receipt size={14} /> Recibo
+                              </button>
+                            )}
+                          </>
+                        )}
+                        <button onClick={() => openDelete(payment)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir"><Trash2 size={18} /></button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+              {((filterType === 'parcelamentos' && groupedInstallments.length === 0) || (filterType !== 'parcelamentos' && filteredPayments.length === 0)) && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-20 text-center text-slate-400 italic">
+                    Nenhum lançamento encontrado para os filtros selecionados.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* NEW PAYMENT MODAL INTOCADO */}
+      {isModalOpen && (
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-lg shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight">Novo Lançamento</h3>
+                <p className="text-xs text-slate-500">Registre cobranças manuais ou parceladas.</p>
+              </div>
+              <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleCreatePayment} className="p-6 space-y-4">
+              <SearchableSelect
+                label="Aluno Beneficiário"
+                placeholder="Selecione o aluno..."
+                required
+                options={data.students.map(s => ({
+                  id: s.id,
+                  name: s.name,
+                  subtext: data.classes.find(c => c.id === s.classId)?.name || 'Sem Turma'
+                }))}
+                value={formData.studentId}
+                onChange={val => setFormData({...formData, studentId: val})}
+              />
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Referente a (Opcional)</label>
+                <select className={inputClass + " w-full"} value={selectedItemId} onChange={handleItemSelect}>
+                  <option value="">Lançamento Avulso / Personalizado</option>
+                  <option value="registration_fee">Taxa de Matrícula Padrão</option>
+                  <optgroup label="Cursos">
+                    {data.courses?.map(c => <option key={`course_${c.id}`} value={`course_${c.id}`}>{c.name} - R$ {c.monthlyFee.toFixed(2)}</option>)}
+                  </optgroup>
+                  <optgroup label="Apostilas">
+                    {data.handouts?.map(h => <option key={`handout_${h.id}`} value={`handout_${h.id}`}>{h.name} - R$ {h.price.toFixed(2)}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Tipo</label>
+                  <select className={inputClass + " w-full"} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}>
+                    <option value="monthly">Mensalidade</option>
+                    <option value="registration">Matrícula</option>
+                    <option value="other">Outros</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1 flex items-center gap-1"><Hash size={12}/> Qtd. Parcelas</label>
+                  <input type="number" min="1" max="100" required className={inputClass + " w-full"} value={manualInstallments} onChange={e => setManualInstallments(parseInt(e.target.value) || 1)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Valor Base (R$)</label>
+                  <input type="number" step="0.01" required className={inputClass + " w-full"} value={formData.amount} onChange={e => setFormData({...formData, amount: parseFloat(e.target.value)})} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1 flex items-center gap-1"><Tag size={12}/> Desconto (R$)</label>
+                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.discount} onChange={e => setFormData({...formData, discount: parseFloat(e.target.value)})} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Multa (%)</label>
+                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.fine} onChange={e => setFormData({...formData, fine: parseFloat(e.target.value) || 0})} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Juros ao Mês (%)</label>
+                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.interest} onChange={e => setFormData({...formData, interest: parseFloat(e.target.value) || 0})} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Data Vencimento Inicial</label>
+                <input 
+                  required 
+                  placeholder="DD/MM/AAAA" 
+                  className={inputClass + " w-full"} 
+                  value={dueDateDisplay} 
+                  onChange={e => {
+                    const masked = formatDateMask(e.target.value);
+                    setDueDateDisplay(masked);
+                    if (masked.length === 10) {
+                      setFormData(prev => ({...prev, dueDate: dateBrToIso(masked)}));
+                    }
+                  }} 
+                  maxLength={10}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Descrição</label>
+                <input placeholder="Ex: Referente a Janeiro/2024" className={inputClass + " w-full"} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+              </div>
+              <div className="pt-4 flex gap-4">
+                <button type="button" onClick={closeModal} className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors font-bold text-xs">Cancelar</button>
+                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text-xs">Gerar Lançamento</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* STUDENT HISTORY MODAL */}
+      {showHistoryModal && selectedStudentHistory && (
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                  <User size={20} className="text-indigo-600"/> {selectedStudentHistory.name}
+                </h3>
+                <p className="text-xs text-slate-500">Histórico completo de pagamentos.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => handlePrintCarne(selectedStudentHistory.id)}
+                  disabled={isFetchingCarne}
+                  className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-all flex items-center gap-2 border border-indigo-100 disabled:opacity-50"
+                >
+                  {isFetchingCarne ? <RefreshCw size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                  Imprimir Carnê Completo
+                </button>
+                <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-0">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase font-bold sticky top-0 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Descrição</th>
+                    <th className="px-4 py-3">Vencimento</th>
+                    <th className="px-4 py-3">Valor</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {data.payments.filter(p => p.studentId === selectedStudentHistory.id).sort((a,b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()).map(p => (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-slate-700">{p.description || (p.type === 'monthly' ? 'Mensalidade' : 'Taxa')}</div>
+                        {p.installmentNumber && <div className="text-[9px] text-slate-400">{p.installmentNumber}/{p.totalInstallments}</div>}
+                      </td>
+                      <td className="px-4 py-3">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td>
+                      <td className="px-4 py-3">R$ {p.amount.toFixed(2)}</td>
+                      <td className="px-4 py-3">{getStatusBadge(p)}</td>
+                      <td className="px-4 py-3 text-right flex justify-end gap-2">
+                        {p.asaasPaymentId && (
+                          <>
+                            {(p.status === 'pending' || p.status === 'overdue') && (
+                              <button 
+                                onClick={() => handleOpenPaymentLink(p.asaasPaymentId!, 'boleto')}
+                                className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-[9px] font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1"
+                              >
+                                <Barcode size={12} /> Boleto
+                              </button>
+                            )}
+                            {(p.status === 'paid' || p.status === 'received' || p.status === 'confirmed') && (
+                              <button 
+                                onClick={() => handleOpenPaymentLink(p.asaasPaymentId!, 'recibo')}
+                                className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-[9px] font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 border border-emerald-100"
+                              >
+                                <Receipt size={12} /> Recibo
+                              </button>
+                            )}
+                          </>
+                        )}
+                        <button onClick={() => { closeModal(); openDelete(p); }} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14}/></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 text-right">
+              <button onClick={closeModal} className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-slate-600 font-bold text-xs hover:bg-slate-100">Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteModal && paymentToDelete && (
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-sm shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">Excluir Pagamento</h3>
+              <p className="text-sm text-slate-500 mb-6">Como deseja excluir este lançamento?</p>
+              
+              <div className="flex flex-col gap-2">
+                {paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_') ? (
+                  <button onClick={() => handleDelete('all')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">
+                    Excluir Carnê Completo
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => handleDelete('single')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">
+                      Excluir Apenas Esta Parcela
+                    </button>
+                    {(paymentToDelete.installmentId || paymentToDelete.totalInstallments || (paymentToDelete as any).asaasIdParaExcluir) && (
+                      <button onClick={() => handleDelete('all')} className="w-full py-3 bg-white border-2 border-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">
+                        Excluir Carnê Completo (Asaas)
+                      </button>
+                    )}
+                  </>
+                )}
+                <button onClick={closeModal} className="w-full py-3 text-slate-400 font-bold text-sm hover:text-slate-600 mt-2">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FALLBACK CARNE MODAL COM CODIGO DE BARRAS REPARADO */}
+      {showFallbackModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-xl w-full max-w-3xl shadow-2xl my-auto relative overflow-hidden animate-slide-up">
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div>
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Carnê Digital</h3>
+                <p className="text-sm text-slate-500 mt-1">O link único do carnê não está disponível. Você pode acessar os boletos individuais abaixo.</p>
+              </div>
+              <button onClick={() => setShowFallbackModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={24} /></button>
+            </div>
+            
+            <div className="p-8 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {fallbackInstallments.map((parcela) => (
+                  <div key={parcela.id} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="text-xs font-black text-indigo-500 uppercase tracking-wider">Parcela
