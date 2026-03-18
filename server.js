@@ -20,28 +20,24 @@ const supabaseKey = process.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cC
 let supabase = null;
 
 if (supabaseUrl && supabaseKey && supabaseUrl !== 'your_supabase_project_url') {
-  supabase = createClient(supabaseUrl, supabaseKey);
+  try { supabase = createClient(supabaseUrl, supabaseKey); } catch (e) { console.warn('Failed to initialize Supabase client:', e); }
 }
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 app.post('/api/upload/logo', upload.single('logo'), async (req, res) => {
   try {
-    if (!supabase) return res.status(500).json({ error: 'Storage não configurado.' });
-    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
-
+    if (!supabase) return res.status(500).json({ error: 'Serviço não configurado.' });
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
     let compressedBuffer;
-    try {
-      compressedBuffer = await sharp(req.file.buffer).resize(500, 500, { fit: 'inside' }).webp({ quality: 60 }).toBuffer();
-    } catch (e) { compressedBuffer = req.file.buffer; }
+    try { compressedBuffer = await sharp(req.file.buffer).resize(500, 500, { fit: 'inside' }).webp({ quality: 60 }).toBuffer(); } 
+    catch (e) { compressedBuffer = req.file.buffer; }
 
-    const fileName = `logo_${Date.now()}.webp`;
-    const filePath = `logos/${fileName}`;
+    const filePath = `logos/logo_${Date.now()}.webp`;
     const { error } = await supabase.storage.from('edumanager-assets').upload(filePath, compressedBuffer, { contentType: 'image/webp', upsert: true });
-
-    if (error) return res.status(500).json({ error: 'Erro ao salvar imagem.' });
-    const { data: publicUrlData } = supabase.storage.from('edumanager-assets').getPublicUrl(filePath);
-    return res.status(200).json({ url: publicUrlData.publicUrl });
+    if (error) return res.status(500).json({ error: 'Erro upload.' });
+    const { data } = supabase.storage.from('edumanager-assets').getPublicUrl(filePath);
+    return res.status(200).json({ url: data.publicUrl });
   } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
@@ -52,13 +48,10 @@ app.post('/api/webhook_asaas', async (req, res) => {
     let updateData = {};
     if (event === 'PAYMENT_RECEIVED' || event === 'PAYMENT_CONFIRMED') {
       updateData = { status: 'PAGO', valor: payment.value, data_pagamento: payment.confirmedDate || payment.paymentDate || new Date().toISOString().split('T')[0] };
-    } else if (event === 'PAYMENT_OVERDUE') {
-      updateData = { status: 'ATRASADO', valor: payment.value };
-    } else if (event === 'PAYMENT_DELETED') {
-      updateData = { status: 'CANCELADO' };
-    } else if (event === 'PAYMENT_UPDATED') {
-      updateData = { valor: payment.value, vencimento: payment.dueDate };
-    } else { return res.status(200).json({ message: 'Ignorado' }); }
+    } else if (event === 'PAYMENT_OVERDUE') updateData = { status: 'ATRASADO', valor: payment.value };
+    else if (event === 'PAYMENT_DELETED') updateData = { status: 'CANCELADO' };
+    else if (event === 'PAYMENT_UPDATED') updateData = { valor: payment.value, vencimento: payment.dueDate };
+    else return res.status(200).json({ message: 'Ignorado' });
 
     await supabase.from('alunos_cobrancas').update(updateData).eq('asaas_payment_id', payment.id);
     return res.status(200).json({ message: 'OK' });
@@ -69,21 +62,16 @@ app.post('/api/gerar_cobranca', async (req, res) => {
   try {
     const { aluno_id, nome, cpf, email, valor, vencimento, multa, juros, desconto, telefone, cep, endereco, numero, bairro, descricao, parcelas } = req.body;
     let customerId = '';
-    
     const searchRes = await fetch(`https://sandbox.asaas.com/api/v3/customers?cpfCnpj=${cpf}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
-    if (searchRes.ok) {
-      const searchData = await searchRes.json();
-      if (searchData.data?.length > 0) customerId = searchData.data[0].id;
-    }
+    if (searchRes.ok) { const sd = await searchRes.json(); if (sd.data?.length > 0) customerId = sd.data[0].id; }
 
     if (!customerId) {
-      const customerRes = await fetch('https://sandbox.asaas.com/api/v3/customers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'access_token': process.env.ASAAS_API_KEY },
+      const cr = await fetch('https://sandbox.asaas.com/api/v3/customers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'access_token': process.env.ASAAS_API_KEY },
         body: JSON.stringify({ name: nome, cpfCnpj: cpf, email, mobilePhone: telefone, postalCode: cep, address: endereco, addressNumber: numero, province: bairro })
       });
-      if (!customerRes.ok) throw new Error('Falha ao criar cliente no Asaas');
-      customerId = (await customerRes.json()).id;
+      if (!cr.ok) throw new Error('Falha ao criar cliente Asaas');
+      customerId = (await cr.json()).id;
     }
 
     const asaasPayload = { customer: customerId, billingType: 'BOLETO', dueDate: vencimento, description: descricao || 'Mensalidade' };
@@ -94,30 +82,26 @@ app.post('/api/gerar_cobranca', async (req, res) => {
     if (juros > 0) asaasPayload.interest = { value: parseFloat(juros), type: 'PERCENTAGE' };
     if (desconto > 0) asaasPayload.discount = { value: parseFloat(desconto), dueDateLimitDays: 0, type: 'FIXED' };
 
-    const paymentRes = await fetch('https://sandbox.asaas.com/api/v3/payments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'access_token': process.env.ASAAS_API_KEY },
+    const pr = await fetch('https://sandbox.asaas.com/api/v3/payments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'access_token': process.env.ASAAS_API_KEY },
       body: JSON.stringify(asaasPayload)
     });
-    if (!paymentRes.ok) throw new Error('Falha ao criar cobrança no Asaas');
+    if (!pr.ok) throw new Error('Falha ao criar cobrança no Asaas');
     
-    const paymentData = await paymentRes.json();
+    const paymentData = await pr.json();
     let paymentsToSave = [];
     
     if (isInst && paymentData.installment) {
       const instId = paymentData.installment;
-      const instRes = await fetch(`https://sandbox.asaas.com/api/v3/payments?installment=${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
-      if (!instRes.ok) throw new Error('Falha ao buscar parcelas');
-      const instData = await instRes.json();
+      const ir = await fetch(`https://sandbox.asaas.com/api/v3/payments?installment=${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (!ir.ok) throw new Error('Falha ao buscar parcelas');
+      const instData = await ir.json();
       paymentsToSave = instData.data.map(p => ({
         aluno_id, asaas_customer_id: customerId, asaas_payment_id: p.id, asaas_installment_id: instId,
         installment: instId, valor: p.value, vencimento: p.dueDate, link_boleto: p.bankSlipUrl
       }));
     } else {
-       paymentsToSave = [{
-         aluno_id, asaas_customer_id: customerId, asaas_payment_id: paymentData.id, installment: null,
-         valor: paymentData.value || valor, vencimento: paymentData.dueDate || vencimento, link_boleto: paymentData.bankSlipUrl
-       }];
+       paymentsToSave = [{ aluno_id, asaas_customer_id: customerId, asaas_payment_id: paymentData.id, installment: null, valor: paymentData.value || valor, vencimento: paymentData.dueDate || vencimento, link_boleto: paymentData.bankSlipUrl }];
     }
 
     await supabase.from('alunos_cobrancas').insert(paymentsToSave);
@@ -154,8 +138,8 @@ app.post('/api/excluir_cobranca', async (req, res) => {
     await supabase.from('alunos_cobrancas').delete().eq('asaas_payment_id', id);
     await supabase.from('alunos_cobrancas').delete().eq('id', id);
 
-    return res.status(200).json({ message: 'Excluído' });
-  } catch (error) { return res.status(500).json({ error: 'Erro interno' }); }
+    return res.status(200).json({ message: 'Excluído com sucesso!' });
+  } catch (error) { return res.status(500).json({ error: 'Erro interno na exclusão.' }); }
 });
 
 app.get('/api/parcelamentos/:id/carne', async (req, res) => {
@@ -175,13 +159,13 @@ app.get('/api/parcelamentos/:id/carne', async (req, res) => {
     }
 
     if (instId) {
-      const asaasRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
-      if (asaasRes.ok) { const data = await asaasRes.json(); if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl }); }
+      const ar = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (ar.ok) { const data = await ar.json(); if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl }); }
     }
     
     const { data: parcelas } = await supabase.from('alunos_cobrancas').select('*').or(`installment.eq.${id},asaas_installment_id.eq.${id}`).order('vencimento', { ascending: true });
     const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status, asaasPaymentId: c.asaas_payment_id })) : [];
-    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'PDF não disponível. Use os boletos individuais.' });
+    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'PDF não disponível. Use os boletos.' });
   } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
@@ -203,38 +187,41 @@ app.get('/api/alunos/:id/carne', async (req, res) => {
     }
 
     if (instId) {
-      const asaasRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
-      if (asaasRes.ok) { const data = await asaasRes.json(); if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl }); }
+      const ar = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (ar.ok) { const data = await ar.json(); if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl }); }
     }
 
     const fallbackId = instId || cobrancas.find(c => c.installment)?.installment;
-    if (!fallbackId) return res.status(400).json({ error: 'Nenhum carnê agrupado encontrado.' });
+    if (!fallbackId) return res.status(400).json({ error: 'Nenhum carnê agrupado.' });
     
     const { data: parcelas } = await supabase.from('alunos_cobrancas').select('*').or(`installment.eq.${fallbackId},asaas_installment_id.eq.${fallbackId}`).order('vencimento', { ascending: true });
     const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status, asaasPaymentId: c.asaas_payment_id })) : [];
-    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'Visualização individual ativada.' });
+    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'Visualização individual.' });
   } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
 app.get('/api/cobrancas/:id/link', async (req, res) => {
   try {
-    const paymentRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${req.params.id}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
-    if (!paymentRes.ok) return res.status(404).json({ error: 'Não encontrada.' });
-    const paymentData = await paymentRes.json();
-    return res.status(200).json({ bankSlipUrl: paymentData.bankSlipUrl || paymentData.invoiceUrl, transactionReceiptUrl: paymentData.transactionReceiptUrl });
+    const p = await fetch(`https://sandbox.asaas.com/api/v3/payments/${req.params.id}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+    if (!p.ok) return res.status(404).json({ error: 'Não encontrada.' });
+    const d = await p.json();
+    return res.status(200).json({ bankSlipUrl: d.bankSlipUrl || d.invoiceUrl, transactionReceiptUrl: d.transactionReceiptUrl });
   } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
 app.patch('/api/alunos/:id/rematricular', async (req, res) => res.json({ success: true }));
 
+// --- LÓGICA DE INICIALIZAÇÃO CORRIGIDA PARA EXPRESS 5 ---
 const distPath = path.join(__dirname, 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
-  app.get('/(.*)', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  // Substituímos o app.get('*') pelo app.use() para evitar o erro do path-to-regexp v8
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
 } else {
   app.get('/', (req, res) => res.send('API Operante!'));
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => { console.log(`🚀 Servidor rodando na porta ${PORT}`); });
