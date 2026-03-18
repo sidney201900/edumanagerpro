@@ -1,265 +1,872 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SchoolData, Payment, Student } from '../types';
 import { useDialog } from '../DialogContext';
 import SearchableSelect from './SearchableSelect';
 import { CheckCircle, Clock, AlertCircle, RefreshCw, Filter, Plus, X, Printer, Tag, Hash, User, BookOpen, Trash2, Eye, Barcode, Receipt, Layers, ChevronUp, ChevronDown } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
-interface FinanceProps { data: SchoolData; updateData: (newData: Partial<SchoolData>) => void; }
+interface FinanceProps {
+  data: SchoolData;
+  updateData: (newData: Partial<SchoolData>) => void;
+}
 
 const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const { showAlert } = useDialog();
-  const [filterStatus, setFilterStatus] = useState<'all'|'pending'|'paid'|'overdue'>('all');
-  const [filterType, setFilterType] = useState<'all'|'avulsas'|'parcelamentos'>('all');
-  const [expandedInst, setExpandedInst] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'avulsas' | 'parcelamentos'>('all');
+  const [expandedInstallments, setExpandedInstallments] = useState<string[]>([]);
   const [filterStudent, setFilterStudent] = useState<string>('all');
   const [filterClass, setFilterClass] = useState<string>('all');
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [showHist, setShowHist] = useState(false);
-  const [showDel, setShowDel] = useState(false);
-  const [showPrint, setShowPrint] = useState(false);
-  const [selHist, setSelHist] = useState<Student | null>(null);
-  const [selCarne, setSelCarne] = useState<string>('');
-  const [payToDel, setPayToDel] = useState<Payment | null>(null);
-  const [isSync, setIsSync] = useState(false);
-  const [isFetchCarne, setIsFetchCarne] = useState(false);
-  const [showFallback, setShowFallback] = useState(false);
-  const [fallbackInst, setFallbackInst] = useState<any[]>([]);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showPrintCarneModal, setShowPrintCarneModal] = useState(false);
+  
+  const [selectedStudentHistory, setSelectedStudentHistory] = useState<Student | null>(null);
+  const [selectedStudentForCarne, setSelectedStudentForCarne] = useState<string>('');
+  const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isFetchingCarne, setIsFetchingCarne] = useState(false);
 
-  useEffect(() => { syncAsaas(); }, []);
-  const dataRef = useRef(data.payments);
-  useEffect(() => { dataRef.current = data.payments; }, [data.payments]);
+  const [showFallbackModal, setShowFallbackModal] = useState(false);
+  const [fallbackInstallments, setFallbackInstallments] = useState<any[]>([]);
 
-  const handleLink = async (id: string, type: 'boleto'|'recibo'|'carne') => {
-    if (!id) return showAlert('Erro', 'ID inválido para esta operação.', 'error');
+  React.useEffect(() => {
+    syncAsaasPayments();
+  }, []);
+
+  const handleOpenPaymentLink = async (id: string, type: 'boleto' | 'recibo' | 'carne') => {
     try {
       showAlert('Aguarde', `Buscando ${type}...`, 'info');
+      
       if (type === 'carne') {
-        const res = await fetch(`/api/parcelamentos/${id}/carne`);
-        const result = await res.json();
-        if (res.ok) {
-          if (result.type === 'fallback') { setFallbackInst(result.boletos); setShowFallback(true); showAlert('Atenção', result.message, 'info'); } 
-          else if (result.url) { window.open(result.url, '_blank'); showAlert('Sucesso', 'Carnê localizado!', 'success'); }
-        } else showAlert('Erro', result.error || 'Falha ao buscar', 'error');
+        const response = await fetch(`/api/parcelamentos/${id}/carne`);
+        const result = await response.json();
+
+        if (response.ok) {
+          if (result.type === 'fallback') {
+            setFallbackInstallments(result.boletos);
+            setShowFallbackModal(true);
+            showAlert('Atenção', result.message, 'info');
+          } else if (result.type === 'pdf' && result.url) {
+            window.open(result.url, '_blank', 'noopener,noreferrer');
+            showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+          }
+        } else {
+          showAlert('Erro', result.error || 'Falha ao buscar carnê.', 'error');
+        }
         return;
       }
-      const res = await fetch(`/api/cobrancas/${id}/link`);
-      const result = await res.json();
-      if (res.ok) {
+
+      const response = await fetch(`/api/cobrancas/${id}/link`);
+      const result = await response.json();
+
+      if (response.ok) {
         const url = type === 'boleto' ? result.bankSlipUrl : result.transactionReceiptUrl;
-        if (url) window.open(url, '_blank'); else showAlert('Atenção', 'Indisponível no momento.', 'warning');
-      } else showAlert('Erro', result.error || 'Falha', 'error');
-    } catch (e) { showAlert('Erro', 'Erro ao processar.', 'error'); }
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } else {
+          showAlert('Atenção', `${type === 'boleto' ? 'Boleto' : 'Recibo'} não disponível.`, 'warning');
+        }
+      } else {
+        showAlert('Erro', result.error || `Falha ao buscar ${type}.`, 'error');
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar ${type}:`, error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    }
   };
 
-  const handlePrint = async (stdId: string) => {
-    setIsFetchCarne(true);
+  const handlePrintCarne = async (studentId: string) => {
+    setIsFetchingCarne(true);
     try {
-      const res = await fetch(`/api/alunos/${stdId}/carne`);
-      const result = await res.json();
-      if (res.ok) {
-        if (result.type === 'fallback') { setFallbackInst(result.boletos); setShowFallback(true); showAlert('Atenção', result.message, 'info'); } 
-        else if (result.url) { window.open(result.url, '_blank'); showAlert('Sucesso', 'Carnê localizado!', 'success'); }
-      } else showAlert('Atenção', result.error || 'Não encontrado.', 'warning');
-    } catch (e) { showAlert('Erro', 'Erro interno.', 'error'); } 
-    finally { setIsFetchCarne(false); }
+      const response = await fetch(`/api/alunos/${studentId}/carne`);
+      const result = await response.json();
+
+      if (response.ok) {
+        if (result.type === 'fallback') {
+          setFallbackInstallments(result.boletos);
+          setShowFallbackModal(true);
+          showAlert('Atenção', result.message, 'info');
+        } else if (result.type === 'pdf' && result.url) {
+          window.open(result.url, '_blank', 'noopener,noreferrer');
+          showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+        }
+      } else {
+        showAlert('Atenção', result.error || 'Não foi possível encontrar o carnê.', response.status === 400 ? 'warning' : 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar carnê:', error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    } finally {
+      setIsFetchingCarne(false);
+    }
   };
 
-  const syncAsaas = async () => {
-    if (!isSupabaseConfigured() || isSync) return;
-    setIsSync(true);
+  const dataPaymentsRef = React.useRef(data.payments);
+  React.useEffect(() => {
+    dataPaymentsRef.current = data.payments;
+  }, [data.payments]);
+
+  const syncAsaasPayments = async () => {
+    if (!isSupabaseConfigured() || isSyncing) return;
+    
+    setIsSyncing(true);
     try {
-      const { data: cp, error } = await supabase.from('alunos_cobrancas').select('*');
+      const { data: cloudPayments, error } = await supabase
+        .from('alunos_cobrancas')
+        .select('asaas_payment_id, status, aluno_id, valor, vencimento, data_pagamento, installment, asaas_installment_id, link_boleto');
+
       if (error) throw error;
-      if (cp && cp.length > 0) {
-        let count = 0;
-        const current = dataRef.current;
-        const updated = current.map(p => {
-          const m = cp.find(c => p.asaasPaymentId ? c.asaas_payment_id === p.asaasPaymentId : (c.aluno_id === p.studentId && Math.abs(c.valor - p.amount) < 0.01 && c.vencimento === p.dueDate));
-          if (m) {
-            const st = (m.status || '').toLowerCase();
-            const nSt = st === 'pago' ? 'paid' : st === 'atrasado' ? 'overdue' : st === 'cancelado' ? 'cancelled' : 'pending';
-            if (p.status !== nSt || p.installmentId !== (m.asaas_installment_id || m.installment) || p.asaasPaymentId !== m.asaas_payment_id) {
-              count++;
-              return { ...p, status: nSt as any, amount: m.valor, paidDate: m.data_pagamento || p.paidDate, installmentId: m.asaas_installment_id || m.installment || p.installmentId, asaasPaymentUrl: m.link_boleto || p.asaasPaymentUrl, asaasPaymentId: m.asaas_payment_id || p.asaasPaymentId };
+
+      if (cloudPayments && cloudPayments.length > 0) {
+        let updatedCount = 0;
+        const currentPayments = dataPaymentsRef.current;
+        const updatedPayments = currentPayments.map(p => {
+          const match = cloudPayments.find(cp => {
+            if (p.asaasPaymentId) {
+              return cp.asaas_payment_id === p.asaasPaymentId;
+            }
+            return cp.aluno_id === p.studentId && 
+                   Math.abs(cp.valor - p.amount) < 0.01 && 
+                   cp.vencimento === p.dueDate;
+          });
+          
+          if (match) {
+            const statusStr = (match.status || '').toLowerCase();
+            const newStatus = statusStr === 'pago' ? 'paid' : 
+                             statusStr === 'atrasado' ? 'overdue' : 
+                             statusStr === 'cancelado' ? 'cancelled' : 'pending';
+            
+            if (p.status !== newStatus || p.amount !== match.valor || p.installmentId !== (match.asaas_installment_id || match.installment) || p.asaasPaymentUrl !== match.link_boleto || p.asaasPaymentId !== match.asaas_payment_id) {
+              updatedCount++;
+              return { 
+                ...p, 
+                status: newStatus as any, 
+                amount: match.valor,
+                paidDate: match.data_pagamento || p.paidDate,
+                installmentId: match.asaas_installment_id || match.installment || p.installmentId,
+                asaasPaymentUrl: match.link_boleto || p.asaasPaymentUrl,
+                asaasPaymentId: match.asaas_payment_id || p.asaasPaymentId
+              };
             }
           }
           return p;
         });
-        if (count > 0) { updateData({ payments: updated }); showAlert('Sincronização', `${count} itens atualizados.`, 'success'); }
-      }
-    } catch (e) {} finally { setIsSync(false); }
-  };
 
-  const [manualInst, setManualInst] = useState(1);
-  const [dueDisp, setDueDisp] = useState(new Date().toLocaleDateString('pt-BR'));
-  const [selItem, setSelItem] = useState('');
-  const [formData, setFormData] = useState({ studentId: '', amount: 150, discount: 0, fine: 0, interest: 0, dueDate: new Date().toISOString().split('T')[0], type: 'monthly', description: '' });
-
-  useEffect(() => {
-    if (formData.studentId) {
-      const st = data.students.find(s => s.id === formData.studentId);
-      if (st) {
-        let f = 0, i = 0;
-        if (selItem.startsWith('course_')) { const c = data.courses.find(x => x.id === selItem.replace('course_','')); f = c?.finePercentage||0; i = c?.interestPercentage||0; } 
-        else if (selItem.startsWith('handout_')) { const h = data.handouts?.find(x => x.id === selItem.replace('handout_','')); f = h?.finePercentage||0; i = h?.interestPercentage||0; } 
-        else { const cl = data.classes.find(x => x.id === st.classId); const c = data.courses.find(x => x.id === cl?.courseId); f = c?.finePercentage||0; i = c?.interestPercentage||0; }
-        setFormData(p => ({ ...p, fine: f, interest: i }));
-      }
-    }
-  }, [formData.studentId, selItem, data]);
-
-  const fMask = (v: string) => v.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2').replace(/(\d{2})(\d)/, '$1/$2').slice(0, 10);
-  const isoDt = (br: string) => br.length===10 ? `${br.split('/')[2]}-${br.split('/')[1]}-${br.split('/')[0]}` : '';
-
-  const filtP = data.payments.filter(p => {
-    const s1 = filterStatus === 'all' || p.status === filterStatus;
-    const s2 = filterStudent === 'all' || p.studentId === filterStudent;
-    const cl = filterClass === 'all' || data.students.find(s=>s.id===p.studentId)?.classId === filterClass;
-    const tp = filterType === 'all' || (filterType === 'avulsas' && !p.installmentId) || (filterType === 'parcelamentos' && !!p.installmentId);
-    return s1 && s2 && cl && tp;
-  }).sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
-
-  const groups = useMemo(() => {
-    if (filterType !== 'parcelamentos') return [];
-    const grps: Record<string, Payment[]> = {};
-    filtP.forEach(p => { if (p.installmentId) { if (!grps[p.installmentId]) grps[p.installmentId] = []; grps[p.installmentId].push(p); } });
-    return Object.entries(grps).map(([id, pts]) => {
-      const s = pts.sort((a, b) => (a.installmentNumber||0) - (b.installmentNumber||0));
-      return { id, pts: s, stId: s[0].studentId, tot: s.reduce((a,b)=>a+b.amount,0), desc: s[0].description?.split(' (')[0]||'Carnê' };
-    }).sort((a, b) => new Date(b.pts[0].dueDate).getTime() - new Date(a.pts[0].dueDate).getTime());
-  }, [filtP, filterType]);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.studentId || formData.amount <= 0) return showAlert('Atenção', 'Selecione aluno e valor', 'warning');
-    const st = data.students.find(s => s.id === formData.studentId);
-    if (!st) return;
-
-    const nP: Payment[] = [];
-    const bD = new Date(dueDisp.length === 10 ? isoDt(dueDisp) : formData.dueDate);
-
-    for (let i = 0; i < manualInst; i++) {
-      const d = new Date(bD); d.setMonth(bD.getMonth() + i);
-      nP.push({ ...formData, lateFee: formData.fine, dueDate: d.toISOString().split('T')[0], id: crypto.randomUUID(), amount: formData.amount, status: 'pending', installmentNumber: manualInst>1?i+1:undefined, totalInstallments: manualInst>1?manualInst:undefined, description: manualInst>1?`${formData.description} (${i+1}/${manualInst})`:formData.description } as any);
-    }
-
-    try {
-      const res = await fetch('/api/gerar_cobranca', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aluno_id: st.id, nome: st.name, cpf: (st.cpf||st.guardianCpf||'').replace(/\D/g,''), email: st.email, valor: formData.amount, vencimento: nP[0].dueDate, multa: formData.fine, juros: formData.interest, desconto: formData.discount, telefone: st.phone, cep: st.addressZip, endereco: st.addressStreet, numero: st.addressNumber, bairro: st.addressNeighborhood, descricao: formData.description, parcelas: manualInst })
-      });
-      if (res.ok) {
-        const ad = await res.json();
-        if (ad.payments?.length > 0) {
-          nP.forEach((p, i) => { const ap = ad.payments[i]||ad.payments[ad.payments.length-1]; p.asaasPaymentUrl = ap.link_boleto; p.asaasPaymentId = ap.asaas_payment_id; if (ad.installment) p.installmentId = ad.installment; });
+        if (updatedCount > 0) {
+          updateData({ payments: updatedPayments });
+          showAlert('Sincronização', `${updatedCount} pagamento(s) atualizado(s).`, 'success');
         }
       }
-    } catch (e) { showAlert('Aviso', 'Salvo só local.', 'warning'); }
-    updateData({ payments: [...data.payments, ...nP] });
-    showAlert('Sucesso', 'Gerado!', 'success'); closeMod();
+    } catch (error) {
+      console.error('Erro ao sincronizar pagamentos:', error);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  const closeMod = () => {
-    setIsClosing(true);
-    setTimeout(() => { setIsModalOpen(false); setShowHist(false); setShowDel(false); setIsClosing(false); setManualInst(1); setDueDisp(new Date().toLocaleDateString('pt-BR')); setFormData({ studentId: '', amount: 150, discount: 0, fine: 0, interest: 0, dueDate: new Date().toISOString().split('T')[0], type: 'monthly', description: '' }); setSelHist(null); setPayToDel(null); }, 300);
+  const [manualInstallments, setManualInstallments] = useState(1);
+  const [dueDateDisplay, setDueDateDisplay] = useState(new Date().toLocaleDateString('pt-BR'));
+  const [selectedItemId, setSelectedItemId] = useState<string>('');
+  
+  const [formData, setFormData] = useState<Omit<Payment, 'id' | 'status' | 'paidDate' | 'lateFee'> & { fine: number }>({
+    studentId: '',
+    amount: 150,
+    discount: 0,
+    discountType: 'fixed',
+    fine: 0,
+    interest: 0,
+    dueDate: new Date().toISOString().split('T')[0],
+    type: 'monthly',
+    description: ''
+  });
+
+  React.useEffect(() => {
+    if (formData.studentId) {
+      const student = data.students.find(s => s.id === formData.studentId);
+      if (student) {
+        let fine = 0;
+        let interest = 0;
+
+        if (selectedItemId) {
+          if (selectedItemId.startsWith('course_')) {
+            const course = data.courses.find(c => c.id === selectedItemId.replace('course_', ''));
+            fine = course?.finePercentage || 0;
+            interest = course?.interestPercentage || 0;
+          } else if (selectedItemId.startsWith('handout_')) {
+            const handout = data.handouts?.find(h => h.id === selectedItemId.replace('handout_', ''));
+            fine = handout?.finePercentage || 0;
+            interest = handout?.interestPercentage || 0;
+          }
+        } else {
+          const studentClass = data.classes.find(c => c.id === student.classId);
+          const course = data.courses.find(c => c.id === studentClass?.courseId);
+          fine = course?.finePercentage || 0;
+          interest = course?.interestPercentage || 0;
+        }
+
+        setFormData(prev => ({
+          ...prev,
+          fine: fine,
+          interest: interest
+        }));
+      }
+    }
+  }, [formData.studentId, selectedItemId, data.students, data.classes, data.courses, data.handouts]);
+
+  const formatDateMask = (val: string) => {
+    return val.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2').replace(/(\d{2})(\d)/, '$1/$2').slice(0, 10);
   };
 
-  const del = async (type: 'single' | 'all') => {
-    if (!payToDel) return;
+  const dateBrToIso = (br: string) => {
+    if (br.length !== 10) return '';
+    const [d, m, y] = br.split('/');
+    return `${y}-${m}-${d}`;
+  };
+
+  const filteredPayments = data.payments
+    .filter(p => {
+      const statusMatch = filterStatus === 'all' || p.status === filterStatus;
+      const studentMatch = filterStudent === 'all' || p.studentId === filterStudent;
+      
+      let classMatch = true;
+      if (filterClass !== 'all') {
+        const student = data.students.find(s => s.id === p.studentId);
+        classMatch = student?.classId === filterClass;
+      }
+
+      let typeMatch = true;
+      if (filterType === 'avulsas') {
+        typeMatch = !p.installmentId;
+      } else if (filterType === 'parcelamentos') {
+        typeMatch = !!p.installmentId;
+      }
+
+      return statusMatch && studentMatch && classMatch && typeMatch;
+    })
+    .sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+
+  const groupedInstallments = useMemo(() => {
+    if (filterType !== 'parcelamentos') return [];
     
-    // AQUI ESTÁ A MÁGICA DA EXCLUSÃO: Se for 'all', ele pega o installmentId. Se for 'single', pega o asaasPaymentId.
-    const id = type === 'all' ? (payToDel.installmentId || (payToDel as any).asaasIdParaExcluir || payToDel.id) : (payToDel.asaasPaymentId || payToDel.id);
+    const groups: Record<string, Payment[]> = {};
+    filteredPayments.forEach(p => {
+      if (p.installmentId) {
+        if (!groups[p.installmentId]) groups[p.installmentId] = [];
+        groups[p.installmentId].push(p);
+      }
+    });
     
-    if (!id) return showAlert('Erro', 'ID não encontrado', 'error');
+    return Object.entries(groups).map(([id, payments]) => {
+      const sorted = payments.sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
+      return {
+        installmentId: id,
+        payments: sorted,
+        studentId: sorted[0].studentId,
+        totalAmount: sorted.reduce((sum, p) => sum + p.amount, 0),
+        totalInstallments: sorted[0].totalInstallments || sorted.length,
+        description: sorted[0].description?.split(' (')[0] || 'Parcelamento',
+        dueDate: sorted[0].dueDate
+      };
+    }).sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+  }, [filteredPayments, filterType]);
+
+  const toggleInstallment = (id: string) => {
+    setExpandedInstallments(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleItemSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setSelectedItemId(val);
+    
+    if (!val) {
+      setFormData(prev => ({...prev, amount: 0, description: ''}));
+      return;
+    }
+
+    if (val === 'registration_fee') {
+      setFormData(prev => ({
+        ...formData,
+        amount: 150,
+        description: 'Taxa de Matrícula',
+        type: 'registration'
+      }));
+      return;
+    }
+
+    if (val.startsWith('course_')) {
+      const courseId = val.replace('course_', '');
+      const course = data.courses.find(c => c.id === courseId);
+      if (course) {
+        setFormData(prev => ({
+          ...prev, 
+          amount: course.monthlyFee, 
+          description: `Mensalidade - ${course.name}`,
+          type: 'monthly',
+          fine: course.finePercentage || 0,
+          interest: course.interestPercentage || 0
+        }));
+      }
+    } else if (val.startsWith('handout_')) {
+      const handoutId = val.replace('handout_', '');
+      const handout = data.handouts?.find(h => h.id === handoutId);
+      if (handout) {
+        setFormData(prev => ({
+          ...prev, 
+          amount: handout.price, 
+          description: `Apostila - ${handout.name}`,
+          type: 'other',
+          fine: handout.finePercentage || 0,
+          interest: handout.interestPercentage || 0
+        }));
+      }
+    }
+  };
+
+  const handleCreatePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.studentId || formData.amount <= 0) {
+      showAlert('Atenção', '⚠️ Selecione um aluno e informe um valor válido.', 'warning');
+      return;
+    }
+
+    const student = data.students.find(s => s.id === formData.studentId);
+    if (!student) {
+      showAlert('Erro', 'Aluno não encontrado.', 'error');
+      return;
+    }
+
+    const newPayments: Payment[] = [];
+    
+    let baseDateStr = formData.dueDate;
+    if (dueDateDisplay.length === 10) {
+        baseDateStr = dateBrToIso(dueDateDisplay);
+    }
+    const baseDate = new Date(baseDateStr);
+
+    for (let i = 0; i < manualInstallments; i++) {
+      const dueDate = new Date(baseDate);
+      dueDate.setMonth(baseDate.getMonth() + i);
+
+      const baseAmount = formData.amount;
+      const { fine, ...rest } = formData;
+      const paymentDueDate = dueDate.toISOString().split('T')[0];
+      
+      newPayments.push({
+        ...rest,
+        lateFee: fine,
+        dueDate: paymentDueDate,
+        id: crypto.randomUUID(),
+        amount: baseAmount,
+        status: 'pending',
+        installmentNumber: manualInstallments > 1 ? i + 1 : undefined,
+        totalInstallments: manualInstallments > 1 ? manualInstallments : undefined,
+        description: manualInstallments > 1 
+          ? `${formData.description || 'Mensalidade'} (${i + 1}/${manualInstallments})`
+          : formData.description
+      });
+    }
+
     try {
-      showAlert('Aguarde', 'Limpando Asaas e Banco de Dados...', 'info');
-      const res = await fetch('/api/excluir_cobranca', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-      if (res.ok) {
+      const rawCpf = (student.cpf || student.guardianCpf || '').replace(/\D/g, '');
+      const isoDueDate = newPayments[0].dueDate;
+      
+      const response = await fetch('/api/gerar_cobranca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aluno_id: student.id,
+          nome: student.name,
+          cpf: rawCpf,
+          email: student.email,
+          valor: formData.amount,
+          vencimento: isoDueDate,
+          multa: formData.fine,
+          juros: formData.interest,
+          desconto: Number(formData.discount) || 0,
+          telefone: student.phone,
+          cep: student.addressZip,
+          endereco: student.addressStreet,
+          numero: student.addressNumber,
+          bairro: student.addressNeighborhood,
+          descricao: formData.description || 'Mensalidade',
+          parcelas: manualInstallments
+        })
+      });
+
+      if (response.ok) {
+        const asaasData = await response.json();
+        
+        if (asaasData.payments && asaasData.payments.length > 0) {
+          newPayments.forEach((p, idx) => {
+            const asaasPayment = asaasData.payments[idx] || asaasData.payments[asaasData.payments.length - 1];
+            p.asaasPaymentUrl = asaasPayment.link_boleto;
+            p.asaasPaymentId = asaasPayment.asaas_payment_id;
+            if (asaasData.installment) {
+              p.installmentId = asaasData.installment;
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao conectar com o Asaas:', error);
+      showAlert('Atenção', 'Salvo apenas localmente.', 'warning');
+    }
+
+    updateData({ payments: [...data.payments, ...newPayments] });
+    showAlert('Sucesso', 'Nova cobrança gerada com sucesso.', 'success');
+    closeModal();
+  };
+
+  const closeModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsModalOpen(false);
+      setShowHistoryModal(false);
+      setShowDeleteModal(false);
+      setIsClosing(false);
+      
+      setManualInstallments(1);
+      const today = new Date();
+      setDueDateDisplay(today.toLocaleDateString('pt-BR'));
+      setFormData({
+        studentId: '',
+        amount: 150,
+        discount: 0,
+        discountType: 'fixed',
+        fine: 0,
+        interest: 0,
+        dueDate: today.toISOString().split('T')[0],
+        type: 'monthly',
+        description: ''
+      });
+      setSelectedStudentHistory(null);
+      setPaymentToDelete(null);
+    }, 300);
+  };
+
+  const handleDelete = async (deleteType: 'single' | 'all') => {
+    if (!paymentToDelete) return;
+
+    let idToDelete = '';
+    if (deleteType === 'all') {
+      idToDelete = paymentToDelete.installmentId || (paymentToDelete as any).asaasIdParaExcluir || paymentToDelete.id;
+    } else {
+      idToDelete = paymentToDelete.asaasPaymentId || paymentToDelete.id;
+    }
+
+    if (!idToDelete) {
+      showAlert('Erro', 'ID da cobrança não encontrado.', 'error');
+      return;
+    }
+
+    try {
+      showAlert('Aguarde', 'Excluindo cobrança...', 'info');
+      const response = await fetch('/api/excluir_cobranca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: idToDelete })
+      });
+
+      if (response.ok) {
         showAlert('Sucesso', 'Excluído no sistema e Asaas.', 'success');
-        updateData({ payments: data.payments.filter(p => p.id !== id && p.installmentId !== id && p.asaasPaymentId !== id) });
-      } else showAlert('Aviso', 'Erro na exclusão.', 'warning');
-    } catch (e) { showAlert('Erro', 'Falha ao conectar.', 'error'); }
-    closeMod();
+        
+        let updatedPayments = [...data.payments];
+        if (idToDelete.startsWith('inst_') || deleteType === 'all') {
+          updatedPayments = updatedPayments.filter(p => p.installmentId !== idToDelete && p.id !== idToDelete);
+        } else {
+          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== idToDelete && p.id !== idToDelete);
+        }
+        updateData({ payments: updatedPayments });
+      } else {
+        const result = await response.json();
+        showAlert('Atenção', result.error || 'Erro na exclusão.', 'warning');
+      }
+    } catch (error) {
+      console.error('Erro ao excluir:', error);
+      showAlert('Erro', 'Falha na comunicação com o servidor.', 'error');
+    }
+
+    closeModal();
   };
 
-  const bge = (p: Payment) => {
-    const s = (p.status || '').toLowerCase();
-    if (s==='paid'||s==='pago'||s==='received') return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase"><CheckCircle size={12}/> Pago</span>;
-    if (s==='overdue'||s==='atrasado') return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase"><AlertCircle size={12}/> Atrasado</span>;
-    return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase"><Clock size={12}/> Pendente</span>;
+  const openHistory = (studentId: string) => {
+    const student = data.students.find(s => s.id === studentId);
+    if (student) {
+      setSelectedStudentHistory(student);
+      setShowHistoryModal(true);
+    }
   };
 
-  const inpCls = "px-4 py-2 bg-white border border-slate-300 rounded-lg text-xs w-full";
+  const openDelete = (payment: Payment) => {
+    setPaymentToDelete(payment);
+    setShowDeleteModal(true);
+  };
+
+  const getStatusBadge = (payment: Payment) => {
+    const status = (payment.status || '').toLowerCase();
+    
+    if (status === 'paid' || status === 'pago' || status === 'received' || status === 'confirmed') {
+      const dueDate = new Date(payment.dueDate);
+      const paidDate = payment.paidDate ? new Date(payment.paidDate) : null;
+      
+      if (paidDate) {
+        dueDate.setHours(0,0,0,0);
+        paidDate.setHours(0,0,0,0);
+        if (paidDate <= dueDate) {
+          return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pagamento em Dia</span>;
+        } else {
+          return <span className="inline-flex items-center gap-1 text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago com Atraso</span>;
+        }
+      }
+      return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago</span>;
+    }
+    
+    if (status === 'overdue' || status === 'atrasado') {
+      return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><AlertCircle size={12}/> Atrasado</span>;
+    }
+    
+    return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Clock size={12}/> Pendente</span>;
+  };
+
+  const inputClass = "px-4 py-2 bg-white text-black border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm text-xs";
 
   return (
-    <div className="space-y-6 animate-in fade-in">
-      <div className="flex justify-between items-center">
-        <div><h2 className="text-3xl font-extrabold text-slate-900">Financeiro</h2><p className="text-slate-500 text-sm">Gestão de cobranças</p></div>
-        <div className="flex gap-2">
-          <button onClick={()=>setShowPrint(true)} className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl flex gap-2 font-bold"><Printer size={20} /> Imprimir Carnê</button>
-          <button onClick={()=>setIsModalOpen(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-xl flex gap-2 font-bold"><Plus size={20} /> Lançamento</button>
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Financeiro</h2>
+          <p className="text-slate-500 text-sm">Gestão de mensalidades vinculadas a contratos e cursos.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button 
+            onClick={() => setShowPrintCarneModal(true)}
+            className="flex-1 sm:flex-none bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-50 transition-all shadow-sm font-bold active:scale-95"
+          >
+            <Printer size={20} /> Imprimir Carnê
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex-1 sm:flex-none bg-indigo-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-lg font-bold active:scale-95"
+          >
+            <Plus size={20} /> Novo Lançamento
+          </button>
         </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden">
-        <div className="p-6 bg-slate-50 border-b flex flex-wrap gap-4">
-           <select className={inpCls+" w-auto"} value={filterType} onChange={e=>setFilterType(e.target.value as any)}><option value="all">Todas</option><option value="avulsas">Avulsas</option><option value="parcelamentos">Carnês</option></select>
-           <select className={inpCls+" w-auto"} value={filterStatus} onChange={e=>setFilterStatus(e.target.value as any)}><option value="all">Todos Status</option><option value="pending">Pendentes</option><option value="paid">Pagos</option><option value="overdue">Atrasados</option></select>
-           <select className={inpCls+" w-auto"} value={filterClass} onChange={e=>{setFilterClass(e.target.value); setFilterStudent('all');}}><option value="all">Turmas</option>{data.classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
-           <select className={inpCls+" w-auto"} value={filterStudent} onChange={e=>setFilterStudent(e.target.value)}><option value="all">Alunos</option>{data.students.filter(s=>filterClass==='all'||s.classId===filterClass).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <div className="p-6 border-b border-slate-100 bg-slate-50/30 space-y-4">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                <Filter size={16} className="text-slate-400" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Visão:</span>
+              </div>
+              <div className="flex gap-1.5">
+                {(['all', 'avulsas', 'parcelamentos'] as const).map(type => (
+                  <button key={type} onClick={() => setFilterType(type)} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${ filterType === type ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300' }`}>
+                    {type === 'all' ? 'Todas as Cobranças' : type === 'avulsas' ? 'Avulsas' : 'Parcelamentos (Carnês)'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                <Filter size={16} className="text-slate-400" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Status:</span>
+              </div>
+              <div className="flex gap-1.5">
+                {(['all', 'pending', 'paid', 'overdue'] as const).map(status => (
+                  <button key={status} onClick={() => setFilterStatus(status)} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${ filterStatus === status ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300' }`}>
+                    {status === 'all' ? 'Todos' : status === 'paid' ? 'Pagos' : status === 'pending' ? 'Pendentes' : 'Atrasados'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="relative">
+              <BookOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <select className={`${inputClass} w-full pl-9`} value={filterClass} onChange={e => { setFilterClass(e.target.value); setFilterStudent('all'); }}>
+                <option value="all">Todas as Turmas</option>
+                {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="relative">
+              <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <select className={`${inputClass} w-full pl-9`} value={filterStudent} onChange={e => setFilterStudent(e.target.value)}>
+                <option value="all">Todos os Alunos</option>
+                {data.students.filter(s => filterClass === 'all' || s.classId === filterClass).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-left"><thead className="bg-slate-50 text-slate-500 text-[10px] uppercase font-black"><tr><th className="p-4">Descrição</th><th className="p-4">Vencimento</th><th className="p-4">Valor</th><th className="p-4">Status</th><th className="p-4 text-right">Ação</th></tr></thead>
-            <tbody>
-              {filterType === 'parcelamentos' ? groups.map(g => (
-                <React.Fragment key={g.id}>
-                  <tr className="bg-slate-50 border-b"><td className="p-4 font-bold">{data.students.find(s=>s.id===g.stId)?.name}<div className="text-[10px] text-indigo-500">CARNÊ {g.pts.length}X</div><div className="text-[10px] font-normal text-slate-400">{g.desc}</div></td><td className="p-4 text-sm">{new Date(g.pts[g.pts.length-1].dueDate).toLocaleDateString('pt-BR')}</td><td className="p-4 font-black">R$ {g.tot.toFixed(2)}</td><td className="p-4"><Layers size={14} className="inline"/></td><td className="p-4 text-right flex justify-end gap-2"><button onClick={()=>setExpandedInst(p=>p.includes(g.id)?p.filter(x=>x!==g.id):[...p, g.id])} className="px-3 py-1 bg-white border rounded text-xs font-bold">Ver</button><button onClick={()=>handleLink(g.id,'carne')} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold"><Printer size={14}/></button><button onClick={()=>{setPayToDel({...g.pts[0], id:g.id, installmentId:g.id, asaasIdParaExcluir:g.id} as any); setShowDel(true);}} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td></tr>
-                  {expandedInst.includes(g.id) && g.pts.map(p => (
-                    <tr key={p.id} className="border-b bg-white"><td className="p-4 pl-10 text-[10px] uppercase text-slate-500">Parc. {p.installmentNumber}</td><td className="p-4 text-sm">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td><td className="p-4 font-bold">R$ {p.amount.toFixed(2)}</td><td className="p-4">{bge(p)}</td><td className="p-4 text-right flex justify-end gap-2">{p.asaasPaymentId && <button onClick={()=>handleLink(p.asaasPaymentId!,'boleto')} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold"><Barcode size={12}/> Boleto</button>}<button onClick={()=>{setPayToDel(p); setShowDel(true);}} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button></td></tr>
-                  ))}
-                </React.Fragment>
-              )) : filtP.map(p => (
-                <tr key={p.id} className="border-b hover:bg-slate-50"><td className="p-4 font-bold">{data.students.find(s=>s.id===p.studentId)?.name}<div className="text-[10px] text-slate-400">{p.description}</div></td><td className="p-4 text-sm">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td><td className="p-4 font-black">R$ {p.amount.toFixed(2)}</td><td className="p-4">{bge(p)}</td><td className="p-4 text-right flex justify-end gap-2">{p.asaasPaymentId && <button onClick={()=>handleLink(p.asaasPaymentId!,'boleto')} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold"><Barcode size={12}/> Boleto</button>}<button onClick={()=>{setPayToDel(p); setShowDel(true);}} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td></tr>
-              ))}
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase font-black tracking-[0.1em]">
+              <tr>
+                <th className="px-6 py-4">Aluno / Descrição</th>
+                <th className="px-6 py-4">Vencimento</th>
+                <th className="px-6 py-4">Valor</th>
+                <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4 text-right">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filterType === 'parcelamentos' ? (
+                groupedInstallments.map(group => {
+                  const student = data.students.find(s => s.id === group.studentId);
+                  const isExpanded = expandedInstallments.includes(group.installmentId);
+                  
+                  return (
+                    <React.Fragment key={group.installmentId}>
+                      <tr className="hover:bg-indigo-50/30 transition-colors group bg-slate-50/50">
+                        <td className="px-6 py-5">
+                          <div className="font-bold text-slate-900 flex items-center gap-2">{student?.name || 'Aluno Removido'}</div>
+                          <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide mt-1 flex items-center gap-1"><Layers size={12} />Carnê de {group.payments.length}x</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{group.description}</div>
+                        </td>
+                        <td className="px-6 py-5 text-slate-600 text-sm font-medium">
+                          {group.payments.length > 0 && (<><span className="text-xs text-slate-400 block">Início: {new Date(group.payments[0].dueDate).toLocaleDateString('pt-BR')}</span><span className="text-xs text-slate-400 block">Fim: {new Date(group.payments[group.payments.length - 1].dueDate).toLocaleDateString('pt-BR')}</span></>)}
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="font-black text-slate-900">R$ {group.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                          <div className="text-[10px] text-slate-500 font-medium">Total do Carnê</div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className="inline-flex items-center gap-1 text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Layers size={12}/> {group.payments.length} Parcelas</span>
+                        </td>
+                        <td className="px-6 py-5 text-right flex justify-end gap-2">
+                          <button onClick={() => toggleInstallment(group.installmentId)} className="px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors inline-flex items-center gap-1.5">
+                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {isExpanded ? 'Ocultar' : 'Ver Parcelas'}
+                          </button>
+                          <button onClick={() => handleOpenPaymentLink(group.installmentId, 'carne')} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors inline-flex items-center gap-1.5 border border-indigo-100">
+                            <Printer size={14} /> Imprimir Carnê
+                          </button>
+                          <button onClick={() => openDelete({ ...group.payments[0], id: group.installmentId, installmentId: group.installmentId, asaasIdParaExcluir: group.installmentId } as any)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir Carnê Completo"><Trash2 size={18} /></button>
+                        </td>
+                      </tr>
+                      {isExpanded && group.payments.map(payment => (
+                        <tr key={payment.id} className="hover:bg-indigo-50/10 transition-colors bg-white">
+                          <td className="px-6 py-4 pl-12 relative">
+                            <div className="absolute left-6 top-0 bottom-0 w-px bg-slate-200"></div><div className="absolute left-6 top-1/2 w-4 h-px bg-slate-200"></div>
+                            <div className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Parcela {payment.installmentNumber}/{payment.totalInstallments}</div>
+                          </td>
+                          <td className="px-6 py-4 text-slate-600 text-sm font-medium">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
+                          <td className="px-6 py-4"><div className="font-bold text-slate-700">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></td>
+                          <td className="px-6 py-4">{getStatusBadge(payment)}</td>
+                          <td className="px-6 py-4 text-right flex justify-end gap-2">
+                            {payment.asaasPaymentId && (
+                              <>
+                                {(payment.status === 'pending' || payment.status === 'overdue') && (
+                                  <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"><Barcode size={12} /> Boleto</button>
+                                )}
+                                {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
+                                  <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"><Receipt size={12} /> Recibo</button>
+                                )}
+                              </>
+                            )}
+                            <button onClick={() => openDelete(payment)} className="p-1.5 text-slate-400 hover:text-red-600 transition-all" title="Excluir Parcela"><Trash2 size={14} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })
+              ) : (
+                filteredPayments.map(payment => {
+                  const student = data.students.find(s => s.id === payment.studentId);
+                  return (
+                    <tr key={payment.id} className="hover:bg-indigo-50/30 transition-colors group">
+                      <td className="px-6 py-5">
+                        <div className="font-bold text-slate-900 flex items-center gap-2">
+                          {student?.name || 'Aluno Removido'}
+                          <button onClick={() => student && openHistory(student.id)} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Ver Histórico do Aluno"><Eye size={14} /></button>
+                        </div>
+                        <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide">
+                          {payment.type === 'registration' ? 'Matrícula' : 'Mensalidade'} {payment.installmentNumber && <span> {payment.installmentNumber}/{payment.totalInstallments}</span>}
+                        </div>
+                        {payment.description && <div className="text-[10px] text-slate-400 mt-0.5">{payment.description}</div>}
+                      </td>
+                      <td className="px-6 py-5 text-slate-600 text-sm font-medium">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
+                      <td className="px-6 py-5">
+                        <div className="font-black text-slate-900">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                        {payment.discount && payment.discount > 0 && <div className="text-[10px] text-emerald-600 font-bold">- Desc: R$ {payment.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>}
+                      </td>
+                      <td className="px-6 py-5">{getStatusBadge(payment)}</td>
+                      <td className="px-6 py-5 text-right flex justify-end gap-2">
+                        {payment.asaasPaymentId && (
+                          <>
+                            {(payment.status === 'pending' || payment.status === 'overdue') && (
+                              <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"><Barcode size={14} /> Boleto</button>
+                            )}
+                            {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
+                              <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"><Receipt size={14} /> Recibo</button>
+                            )}
+                          </>
+                        )}
+                        <button onClick={() => openDelete(payment)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir"><Trash2 size={18} /></button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* FORMULÁRIO COMPLETO E COM TODOS OS CAMPOS */}
+      {/* NEW PAYMENT MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 overflow-y-auto"><div className="bg-white p-6 rounded-xl w-full max-w-lg mt-10"><h3 className="text-xl font-black mb-4">Novo Lançamento</h3><form onSubmit={handleCreate} className="space-y-4">
-          <SearchableSelect label="Aluno" options={data.students.map(s=>({id:s.id,name:s.name}))} value={formData.studentId} onChange={v=>setFormData({...formData,studentId:v})} required/>
-          <select className={inpCls} value={selItem} onChange={e=>{setSelItem(e.target.value); setFormData({...formData, description: e.target.options[e.target.selectedIndex].text});}}><option value="">Personalizado</option><optgroup label="Cursos">{data.courses.map(c=><option key={c.id} value={`course_${c.id}`}>{c.name}</option>)}</optgroup></select>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor Base (R$)</label><input className={inpCls} type="number" step="0.01" value={formData.amount} onChange={e=>setFormData({...formData,amount:Number(e.target.value)})} /></div>
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Qtd Parcelas</label><input className={inpCls} type="number" value={manualInst} onChange={e=>setManualInst(Number(e.target.value))} /></div>
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-lg shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div><h3 className="text-xl font-black text-slate-800 tracking-tight">Novo Lançamento</h3><p className="text-xs text-slate-500">Registre cobranças manuais ou parceladas.</p></div>
+              <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleCreatePayment} className="p-6 space-y-4">
+              <SearchableSelect label="Aluno Beneficiário" placeholder="Selecione o aluno..." required options={data.students.map(s => ({ id: s.id, name: s.name }))} value={formData.studentId} onChange={val => setFormData({...formData, studentId: val})} />
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Referente a (Opcional)</label>
+                <select className={inputClass + " w-full"} value={selectedItemId} onChange={handleItemSelect}>
+                  <option value="">Lançamento Avulso / Personalizado</option>
+                  <option value="registration_fee">Taxa de Matrícula Padrão</option>
+                  <optgroup label="Cursos">{data.courses?.map(c => <option key={`course_${c.id}`} value={`course_${c.id}`}>{c.name} - R$ {c.monthlyFee.toFixed(2)}</option>)}</optgroup>
+                  <optgroup label="Apostilas">{data.handouts?.map(h => <option key={`handout_${h.id}`} value={`handout_${h.id}`}>{h.name} - R$ {h.price.toFixed(2)}</option>)}</optgroup>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Tipo</label><select className={inputClass + " w-full"} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}><option value="monthly">Mensalidade</option><option value="registration">Matrícula</option><option value="other">Outros</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1 flex items-center gap-1"><Hash size={12}/> Qtd. Parcelas</label><input type="number" min="1" max="100" required className={inputClass + " w-full"} value={manualInstallments} onChange={e => setManualInstallments(parseInt(e.target.value) || 1)} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Valor Base (R$)</label><input type="number" step="0.01" required className={inputClass + " w-full"} value={formData.amount} onChange={e => setFormData({...formData, amount: parseFloat(e.target.value)})} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1 flex items-center gap-1"><Tag size={12}/> Desconto (R$)</label><input type="number" step="0.01" className={inputClass + " w-full"} value={formData.discount} onChange={e => setFormData({...formData, discount: parseFloat(e.target.value)})} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Multa (%)</label><input type="number" step="0.01" className={inputClass + " w-full"} value={formData.fine} onChange={e => setFormData({...formData, fine: parseFloat(e.target.value) || 0})} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Juros ao Mês (%)</label><input type="number" step="0.01" className={inputClass + " w-full"} value={formData.interest} onChange={e => setFormData({...formData, interest: parseFloat(e.target.value) || 0})} /></div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Data Vencimento Inicial</label>
+                <input required placeholder="DD/MM/AAAA" className={inputClass + " w-full"} value={dueDateDisplay} onChange={e => { const masked = formatDateMask(e.target.value); setDueDateDisplay(masked); if (masked.length === 10) { setFormData(prev => ({...prev, dueDate: dateBrToIso(masked)})); } }} maxLength={10} />
+              </div>
+              <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Descrição</label><input placeholder="Ex: Referente a Janeiro/2024" className={inputClass + " w-full"} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+              <div className="pt-4 flex gap-4"><button type="button" onClick={closeModal} className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors font-bold text-xs">Cancelar</button><button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text-xs">Gerar Lançamento</button></div>
+            </form>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Desconto (R$)</label><input className={inpCls} type="number" step="0.01" value={formData.discount} onChange={e=>setFormData({...formData,discount:Number(e.target.value)})} /></div>
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Vencimento (DD/MM/AAAA)</label><input className={inpCls} value={dueDisp} onChange={e=>{setDueDisp(fMask(e.target.value)); if(e.target.value.length===10) setFormData({...formData, dueDate: isoDt(e.target.value)})}} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Multa (%)</label><input className={inpCls} type="number" step="0.01" value={formData.fine} onChange={e=>setFormData({...formData,fine:Number(e.target.value)})} /></div>
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Juros ao Mês (%)</label><input className={inpCls} type="number" step="0.01" value={formData.interest} onChange={e=>setFormData({...formData,interest:Number(e.target.value)})} /></div>
-          </div>
-          <div><label className="text-[10px] font-bold text-slate-400 uppercase">Descrição Opcional</label><input className={inpCls} value={formData.description} onChange={e=>setFormData({...formData,description:e.target.value})} /></div>
-          <div className="flex gap-2"><button type="button" onClick={closeMod} className="flex-1 py-2 border rounded">Cancelar</button><button type="submit" className="flex-1 py-2 bg-indigo-600 text-white rounded">Salvar</button></div>
-        </form></div></div>
+        </div>
       )}
 
-      {showDel && payToDel && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50"><div className="bg-white p-6 rounded-xl w-full max-w-sm text-center"><Trash2 size={30} className="mx-auto text-red-500 mb-4"/><h3 className="text-lg font-black mb-4">Excluir Pagamento</h3><div className="space-y-2"><button onClick={()=>del('single')} className="w-full py-2 bg-red-600 text-white rounded font-bold">Excluir Parcela</button>{(payToDel.installmentId || (payToDel as any).asaasIdParaExcluir) && <button onClick={()=>del('all')} className="w-full py-2 border border-red-200 text-red-600 rounded font-bold">Excluir Carnê Completo</button>}<button onClick={closeMod} className="w-full py-2 text-slate-500">Cancelar</button></div></div></div>
+      {/* STUDENT HISTORY MODAL */}
+      {showHistoryModal && selectedStudentHistory && (
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div><h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2"><User size={20} className="text-indigo-600"/> {selectedStudentHistory.name}</h3></div>
+              <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-0">
+              <table className="w-full text-left"><thead className="bg-slate-50 text-slate-500 text-[10px] uppercase font-bold sticky top-0 border-b border-slate-200"><tr><th className="px-4 py-3">Descrição</th><th className="px-4 py-3">Vencimento</th><th className="px-4 py-3">Valor</th><th className="px-4 py-3">Status</th></tr></thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {data.payments.filter(p => p.studentId === selectedStudentHistory.id).sort((a,b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()).map(p => (
+                    <tr key={p.id} className="hover:bg-slate-50"><td className="px-4 py-3"><div className="font-bold text-slate-700">{p.description}</div></td><td className="px-4 py-3">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td><td className="px-4 py-3">R$ {p.amount.toFixed(2)}</td><td className="px-4 py-3">{getStatusBadge(p)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
 
-      {showFallback && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50"><div className="bg-white p-6 rounded-xl w-full max-w-2xl"><h3 className="text-xl font-black mb-4">Carnê Digital</h3><div className="grid grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">{fallbackInst.map(p=><div key={p.id} className="border p-4 rounded"><div className="text-xs text-indigo-500 font-bold">Parc. {p.numero}</div><div className="text-lg font-black">R$ {p.valor}</div><div className="text-sm">{new Date(p.vencimento).toLocaleDateString('pt-BR')}</div><div className="mt-2 pt-2 border-t flex justify-end">{p.asaasPaymentId ? <button onClick={()=>handleLink(p.asaasPaymentId,'boleto')} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded font-bold flex gap-1"><Barcode size={12}/> Boleto</button> : <span className="text-xs text-slate-400">Indisponível</span>}</div></div>)}</div><button onClick={()=>setShowFallback(false)} className="mt-4 w-full py-2 border rounded font-bold">Fechar</button></div></div>
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteModal && paymentToDelete && (
+        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className={`bg-white rounded-xl w-full max-w-sm shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 size={24} /></div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">Excluir Pagamento</h3>
+              <div className="flex flex-col gap-2 mt-6">
+                {paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_') ? (
+                  <button onClick={() => handleDelete('all')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">Excluir Carnê Completo</button>
+                ) : (
+                  <>
+                    <button onClick={() => handleDelete('single')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">Excluir Apenas Esta Parcela</button>
+                    {(paymentToDelete.installmentId || (paymentToDelete as any).asaasIdParaExcluir) && (
+                      <button onClick={() => handleDelete('all')} className="w-full py-3 bg-white border-2 border-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">Excluir Carnê Completo (Asaas)</button>
+                    )}
+                  </>
+                )}
+                <button onClick={closeModal} className="w-full py-3 text-slate-400 font-bold text-sm hover:text-slate-600 mt-2">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
-      {showPrint && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50"><div className="bg-white p-6 rounded-xl w-full max-w-md"><h3 className="text-xl font-black mb-4">Imprimir Carnê</h3><SearchableSelect label="Selecione o Aluno" options={data.students.map(s=>({id:s.id,name:s.name}))} value={selCarne} onChange={setSelCarne} required/><div className="flex gap-2 mt-4"><button onClick={()=>setShowPrint(false)} className="flex-1 py-2 border rounded font-bold">Cancelar</button><button onClick={()=>{handlePrint(selCarne); setShowPrint(false); setSelCarne('');}} className="flex-1 py-2 bg-indigo-600 text-white rounded font-bold">Imprimir</button></div></div></div>
+      {/* FALLBACK CARNE MODAL */}
+      {showFallbackModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-xl w-full max-w-3xl shadow-2xl my-auto relative overflow-hidden animate-slide-up">
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div><h3 className="text-2xl font-black text-slate-800 tracking-tight">Carnê Digital</h3></div>
+              <button onClick={() => setShowFallbackModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={24} /></button>
+            </div>
+            <div className="p-8 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {fallbackInstallments.map((parcela) => (
+                  <div key={parcela.id} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all">
+                    <div className="flex justify-between items-start">
+                      <div><div className="text-xs font-black text-indigo-500 uppercase tracking-wider">Parcela {parcela.numero}</div><div className="text-lg font-bold text-slate-800 mt-0.5">R$ {parcela.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div></div>
+                      <div className="text-right"><div className="text-xs text-slate-400 font-medium">Vencimento</div><div className="text-sm font-bold text-slate-700">{new Date(parcela.vencimento).toLocaleDateString('pt-BR')}</div></div>
+                    </div>
+                    <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-amber-600 bg-amber-50">Status</span>
+                      {parcela.asaasPaymentId ? (
+                        <button onClick={() => handleOpenPaymentLink(parcela.asaasPaymentId, 'boleto')} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors inline-flex items-center gap-1.5"><Barcode size={14} /> Boleto</button>
+                      ) : ( <span className="text-xs text-slate-400 italic">Boleto indisponível</span> )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRINT CARNE MODAL */}
+      {showPrintCarneModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl my-auto relative overflow-hidden animate-slide-up">
+            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div><h3 className="text-2xl font-black text-slate-800 tracking-tight">Imprimir Carnê</h3></div>
+              <button onClick={() => setShowPrintCarneModal(false)} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={24} /></button>
+            </div>
+            <div className="p-8 space-y-8">
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                <SearchableSelect label="Aluno" placeholder="Pesquise pelo nome do aluno..." required options={data.students.map(s => ({ id: s.id, name: s.name }))} value={selectedStudentForCarne} onChange={setSelectedStudentForCarne} />
+              </div>
+              <div className="flex justify-end gap-4 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setShowPrintCarneModal(false)} className="px-6 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors">Cancelar</button>
+                <button type="button" onClick={() => { if (selectedStudentForCarne) { handlePrintCarne(selectedStudentForCarne); setShowPrintCarneModal(false); setSelectedStudentForCarne(''); } }} disabled={!selectedStudentForCarne || isFetchingCarne} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 flex items-center gap-2 text-lg"><Printer size={20} /> Imprimir</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
