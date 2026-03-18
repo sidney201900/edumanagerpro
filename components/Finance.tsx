@@ -18,26 +18,24 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const [filterStudent, setFilterStudent] = useState<string>('all');
   const [filterClass, setFilterClass] = useState<string>('all');
   
-  // Modais states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showPrintCarneModal, setShowPrintCarneModal] = useState(false);
   
-  // Selection states
   const [selectedStudentHistory, setSelectedStudentHistory] = useState<Student | null>(null);
   const [selectedStudentForCarne, setSelectedStudentForCarne] = useState<string>('');
   const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isFetchingCarne, setIsFetchingCarne] = useState(false);
 
+  const [showFallbackModal, setShowFallbackModal] = useState(false);
+  const [fallbackInstallments, setFallbackInstallments] = useState<any[]>([]);
+
   React.useEffect(() => {
     syncAsaasPayments();
   }, []);
-
-  const [showFallbackModal, setShowFallbackModal] = useState(false);
-  const [fallbackInstallments, setFallbackInstallments] = useState<any[]>([]);
 
   const handleOpenPaymentLink = async (id: string, type: 'boleto' | 'recibo' | 'carne') => {
     try {
@@ -70,14 +68,14 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         if (url) {
           window.open(url, '_blank', 'noopener,noreferrer');
         } else {
-          showAlert('Atenção', `${type === 'boleto' ? 'Boleto' : 'Recibo'} não disponível.`, 'warning');
+          showAlert('Atenção', `${type === 'boleto' ? 'Boleto' : 'Recibo'} não disponível no momento.`, 'warning');
         }
       } else {
         showAlert('Erro', result.error || `Falha ao buscar ${type}.`, 'error');
       }
     } catch (error) {
       console.error(`Erro ao buscar ${type}:`, error);
-      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+      showAlert('Erro', 'Ocorreu um erro ao tentar processar a solicitação.', 'error');
     }
   };
 
@@ -128,12 +126,8 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         const currentPayments = dataPaymentsRef.current;
         const updatedPayments = currentPayments.map(p => {
           const match = cloudPayments.find(cp => {
-            if (p.asaasPaymentId) {
-              return cp.asaas_payment_id === p.asaasPaymentId;
-            }
-            return cp.aluno_id === p.studentId && 
-                   Math.abs(cp.valor - p.amount) < 0.01 && 
-                   cp.vencimento === p.dueDate;
+            if (p.asaasPaymentId) return cp.asaas_payment_id === p.asaasPaymentId;
+            return cp.aluno_id === p.studentId && Math.abs(cp.valor - p.amount) < 0.01 && cp.vencimento === p.dueDate;
           });
           
           if (match) {
@@ -160,28 +154,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
         if (updatedCount > 0) {
           updateData({ payments: updatedPayments });
-          
-          const hasOverdue = updatedPayments.some((p, idx) => {
-            const oldP = currentPayments[idx];
-            return oldP && oldP.status !== 'overdue' && p.status === 'overdue';
-          });
-          
-          const hasPaid = updatedPayments.some((p, idx) => {
-            const oldP = currentPayments[idx];
-            return oldP && oldP.status !== 'paid' && p.status === 'paid';
-          });
-
-          let message = `${updatedCount} pagamento(s) atualizado(s).`;
-          if (hasPaid && !hasOverdue) message = 'Pagamento confirmado e registrado.';
-          if (hasOverdue && !hasPaid) message = 'Status atualizado para Atrasado.';
-          if (hasPaid && hasOverdue) message = 'Pagamentos e atrasos atualizados.';
-
-          showAlert('Sincronização', message, 'success');
+          showAlert('Sincronização', `${updatedCount} pagamento(s) atualizado(s).`, 'success');
         }
       }
     } catch (error) {
       console.error('Erro ao sincronizar pagamentos:', error);
-      showAlert('Erro', 'Falha ao sincronizar com o Asaas.', 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -228,11 +205,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
           interest = course?.interestPercentage || 0;
         }
 
-        setFormData(prev => ({
-          ...prev,
-          fine: fine,
-          interest: interest
-        }));
+        setFormData(prev => ({ ...prev, fine: fine, interest: interest }));
       }
     }
   }, [formData.studentId, selectedItemId, data.students, data.classes, data.courses, data.handouts]);
@@ -259,11 +232,8 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       }
 
       let typeMatch = true;
-      if (filterType === 'avulsas') {
-        typeMatch = !p.installmentId;
-      } else if (filterType === 'parcelamentos') {
-        typeMatch = !!p.installmentId;
-      }
+      if (filterType === 'avulsas') typeMatch = !p.installmentId;
+      else if (filterType === 'parcelamentos') typeMatch = !!p.installmentId;
 
       return statusMatch && studentMatch && classMatch && typeMatch;
     })
@@ -295,9 +265,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   }, [filteredPayments, filterType]);
 
   const toggleInstallment = (id: string) => {
-    setExpandedInstallments(prev => 
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
+    setExpandedInstallments(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
   const handleItemSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -312,12 +280,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
     if (val === 'registration_fee') {
       setSelectedItemType('registration');
-      setFormData(prev => ({
-        ...formData,
-        amount: 150,
-        description: 'Taxa de Matrícula',
-        type: 'registration'
-      }));
+      setFormData(prev => ({ ...formData, amount: 150, description: 'Taxa de Matrícula', type: 'registration' }));
       return;
     }
 
@@ -326,28 +289,14 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       const course = data.courses.find(c => c.id === courseId);
       if (course) {
         setSelectedItemType('course');
-        setFormData(prev => ({
-          ...prev, 
-          amount: course.monthlyFee, 
-          description: `Mensalidade - ${course.name}`,
-          type: 'monthly',
-          fine: course.finePercentage || 0,
-          interest: course.interestPercentage || 0
-        }));
+        setFormData(prev => ({ ...prev, amount: course.monthlyFee, description: `Mensalidade - ${course.name}`, type: 'monthly', fine: course.finePercentage || 0, interest: course.interestPercentage || 0 }));
       }
     } else if (val.startsWith('handout_')) {
       const handoutId = val.replace('handout_', '');
       const handout = data.handouts?.find(h => h.id === handoutId);
       if (handout) {
         setSelectedItemType('handout');
-        setFormData(prev => ({
-          ...prev, 
-          amount: handout.price, 
-          description: `Apostila - ${handout.name}`,
-          type: 'other',
-          fine: handout.finePercentage || 0,
-          interest: handout.interestPercentage || 0
-        }));
+        setFormData(prev => ({ ...prev, amount: handout.price, description: `Apostila - ${handout.name}`, type: 'other', fine: handout.finePercentage || 0, interest: handout.interestPercentage || 0 }));
       }
     }
   };
@@ -356,22 +305,16 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     e.preventDefault();
     
     if (!formData.studentId || formData.amount <= 0) {
-      showAlert('Atenção', '⚠️ Por favor, selecione um aluno e informe um valor válido.', 'warning');
+      showAlert('Atenção', '⚠️ Selecione um aluno e informe um valor válido.', 'warning');
       return;
     }
 
     const student = data.students.find(s => s.id === formData.studentId);
-    if (!student) {
-      showAlert('Erro', 'Aluno não encontrado.', 'error');
-      return;
-    }
+    if (!student) return;
 
     const newPayments: Payment[] = [];
-    
     let baseDateStr = formData.dueDate;
-    if (dueDateDisplay.length === 10) {
-        baseDateStr = dateBrToIso(dueDateDisplay);
-    }
+    if (dueDateDisplay.length === 10) baseDateStr = dateBrToIso(dueDateDisplay);
     const baseDate = new Date(baseDateStr);
 
     for (let i = 0; i < manualInstallments; i++) {
@@ -391,9 +334,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         status: 'pending',
         installmentNumber: manualInstallments > 1 ? i + 1 : undefined,
         totalInstallments: manualInstallments > 1 ? manualInstallments : undefined,
-        description: manualInstallments > 1 
-          ? `${formData.description || 'Mensalidade'} (${i + 1}/${manualInstallments})`
-          : formData.description
+        description: manualInstallments > 1 ? `${formData.description || 'Mensalidade'} (${i + 1}/${manualInstallments})` : formData.description
       });
     }
 
@@ -419,7 +360,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
           endereco: student.addressStreet,
           numero: student.addressNumber,
           bairro: student.addressNeighborhood,
-          nascimento: student.birthDate,
           descricao: formData.description || 'Mensalidade',
           parcelas: manualInstallments
         })
@@ -427,56 +367,22 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
       if (response.ok) {
         const asaasData = await response.json();
-        
         if (asaasData.payments && asaasData.payments.length > 0) {
           newPayments.forEach((p, idx) => {
             const asaasPayment = asaasData.payments[idx] || asaasData.payments[asaasData.payments.length - 1];
             p.asaasPaymentUrl = asaasPayment.link_boleto;
             p.asaasPaymentId = asaasPayment.asaas_payment_id;
-            if (asaasData.installment) {
-              p.installmentId = asaasData.installment;
-            }
+            if (asaasData.installment) p.installmentId = asaasData.installment;
           });
         }
-      } else {
-        throw new Error('Erro na resposta da API');
       }
     } catch (error) {
-      console.error('Erro ao conectar com o Asaas:', error);
-      showAlert('Atenção', 'Erro ao conectar com o Asaas. Lançamentos salvos apenas localmente.', 'warning');
+      console.error('Erro Asaas:', error);
+      showAlert('Atenção', 'Erro Asaas. Salvo apenas localmente.', 'warning');
     }
 
-    let newDeliveries = [...(data.handoutDeliveries || [])];
-    if (selectedItemType === 'handout' && newPayments.length > 0) {
-      const handoutId = selectedItemId.replace('handout_', '');
-      const firstPayment = newPayments[0];
-      
-      const existingDeliveryIndex = newDeliveries.findIndex(d => d.studentId === student.id && d.handoutId === handoutId);
-      
-      if (existingDeliveryIndex >= 0) {
-        newDeliveries[existingDeliveryIndex] = {
-          ...newDeliveries[existingDeliveryIndex],
-          asaasPaymentId: firstPayment.asaasPaymentId,
-          asaasPaymentUrl: firstPayment.asaasPaymentUrl
-        };
-      } else {
-        newDeliveries.push({
-          id: crypto.randomUUID(),
-          studentId: student.id,
-          handoutId: handoutId,
-          deliveryStatus: 'pending',
-          paymentStatus: 'pending',
-          asaasPaymentId: firstPayment.asaasPaymentId,
-          asaasPaymentUrl: firstPayment.asaasPaymentUrl
-        });
-      }
-    }
-
-    updateData({ 
-      payments: [...data.payments, ...newPayments],
-      ...(selectedItemType === 'handout' ? { handoutDeliveries: newDeliveries } : {})
-    });
-    showAlert('Sucesso', 'Nova cobrança gerada com sucesso.', 'success');
+    updateData({ payments: [...data.payments, ...newPayments] });
+    showAlert('Sucesso', 'Cobrança gerada com sucesso.', 'success');
     closeModal();
   };
 
@@ -492,15 +398,8 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       const today = new Date();
       setDueDateDisplay(today.toLocaleDateString('pt-BR'));
       setFormData({
-        studentId: '',
-        amount: 150,
-        discount: 0,
-        discountType: 'fixed',
-        fine: 0,
-        interest: 0,
-        dueDate: today.toISOString().split('T')[0],
-        type: 'monthly',
-        description: ''
+        studentId: '', amount: 150, discount: 0, discountType: 'fixed', fine: 0, interest: 0,
+        dueDate: today.toISOString().split('T')[0], type: 'monthly', description: ''
       });
       setSelectedStudentHistory(null);
       setPaymentToDelete(null);
@@ -510,9 +409,8 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const handleDelete = async (deleteType: 'single' | 'all') => {
     if (!paymentToDelete) return;
 
-    // Lógica inteligente para envio do ID (Asaas ou Fallback Local)
+    // Inteligência: Prioriza o envio do ID correto baseado no escopo da deleção
     let idToDelete = '';
-
     if (deleteType === 'all') {
       idToDelete = paymentToDelete.installmentId || (paymentToDelete as any).asaasIdParaExcluir || paymentToDelete.id;
     } else {
@@ -525,31 +423,27 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
 
     try {
-      showAlert('Aguarde', deleteType === 'all' ? 'Limpando carnê completo e registros...' : 'Limpando cobrança...', 'info');
+      showAlert('Aguarde', 'Excluindo cobrança...', 'info');
       const response = await fetch('/api/excluir_cobranca', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: idToDelete })
       });
 
-      const result = await response.json();
-
       if (response.ok) {
-        showAlert('Sucesso', 'Registro(s) apagado(s) com sucesso da base de dados.', 'success');
+        showAlert('Sucesso', 'Cobrança excluída da base local e Asaas.', 'success');
         
-        // Limpeza abrangente no estado local garantindo que saia da tela
         const updatedPayments = data.payments.filter(p => 
-          p.id !== idToDelete && 
-          p.installmentId !== idToDelete && 
-          p.asaasPaymentId !== idToDelete
+          p.id !== idToDelete && p.installmentId !== idToDelete && p.asaasPaymentId !== idToDelete
         );
         updateData({ payments: updatedPayments });
       } else {
-        showAlert('Atenção', result.error || 'Ocorreu um erro ao processar a exclusão.', 'warning');
+        const result = await response.json();
+        showAlert('Atenção', result.error || 'Erro na exclusão.', 'warning');
       }
     } catch (error) {
-      console.error('Erro ao excluir:', error);
-      showAlert('Erro', 'Falha na comunicação com o servidor ao excluir.', 'error');
+      console.error('Erro exclusao:', error);
+      showAlert('Erro', 'Falha na comunicação com servidor.', 'error');
     }
 
     closeModal();
@@ -575,32 +469,15 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
       const dueDate = new Date(payment.dueDate);
       const paidDate = payment.paidDate ? new Date(payment.paidDate) : null;
       
-      if (paidDate) {
-        dueDate.setHours(0,0,0,0);
-        paidDate.setHours(0,0,0,0);
-        
-        if (paidDate <= dueDate) {
-          return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pagamento em Dia</span>;
-        } else {
-          return <span className="inline-flex items-center gap-1 text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago com Atraso</span>;
-        }
+      if (paidDate && paidDate > dueDate) {
+        return <span className="inline-flex items-center gap-1 text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago Atrasado</span>;
       }
       return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><CheckCircle size={12}/> Pago</span>;
     }
-    
     if (status === 'overdue' || status === 'atrasado') {
       return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><AlertCircle size={12}/> Atrasado</span>;
     }
-    
-    if (status === 'pending' || status === 'pendente' || !status) {
-      return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Clock size={12}/> Pendente</span>;
-    }
-    
-    if (status === 'cancelled' || status === 'cancelado') {
-      return <span className="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><X size={12}/> Cancelado</span>;
-    }
-    
-    return null;
+    return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider"><Clock size={12}/> Pendente</span>;
   };
 
   const inputClass = "px-4 py-2 bg-white text-black border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm text-xs";
@@ -636,7 +513,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 <Filter size={16} className="text-slate-400" />
                 <span className="text-[10px] font-bold text-slate-500 uppercase">Visão:</span>
               </div>
-              
               <div className="flex gap-1.5">
                 {(['all', 'avulsas', 'parcelamentos'] as const).map(type => (
                   <button
@@ -646,7 +522,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                       filterType === type ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
                     }`}
                   >
-                    {type === 'all' ? 'Todas as Cobranças' : type === 'avulsas' ? 'Avulsas' : 'Parcelamentos (Carnês)'}
+                    {type === 'all' ? 'Todas Cobranças' : type === 'avulsas' ? 'Avulsas' : 'Carnês'}
                   </button>
                 ))}
               </div>
@@ -657,7 +533,6 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 <Filter size={16} className="text-slate-400" />
                 <span className="text-[10px] font-bold text-slate-500 uppercase">Status:</span>
               </div>
-              
               <div className="flex gap-1.5">
                 {(['all', 'pending', 'paid', 'overdue'] as const).map(status => (
                   <button
@@ -677,29 +552,16 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="relative">
               <BookOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <select 
-                className={`${inputClass} w-full pl-9`}
-                value={filterClass}
-                onChange={e => {
-                  setFilterClass(e.target.value);
-                  setFilterStudent('all'); 
-                }}
-              >
+              <select className={`${inputClass} w-full pl-9`} value={filterClass} onChange={e => { setFilterClass(e.target.value); setFilterStudent('all'); }}>
                 <option value="all">Todas as Turmas</option>
                 {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="relative">
               <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <select 
-                className={`${inputClass} w-full pl-9`}
-                value={filterStudent}
-                onChange={e => setFilterStudent(e.target.value)}
-              >
+              <select className={`${inputClass} w-full pl-9`} value={filterStudent} onChange={e => setFilterStudent(e.target.value)}>
                 <option value="all">Todos os Alunos</option>
-                {data.students
-                  .filter(s => filterClass === 'all' || s.classId === filterClass)
-                  .map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {data.students.filter(s => filterClass === 'all' || s.classId === filterClass).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
           </div>
@@ -726,26 +588,14 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                     <React.Fragment key={group.installmentId}>
                       <tr className="hover:bg-indigo-50/30 transition-colors group bg-slate-50/50">
                         <td className="px-6 py-5">
-                          <div className="font-bold text-slate-900 flex items-center gap-2">
-                            {student?.name || 'Aluno Removido'}
-                          </div>
-                          <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide mt-1 flex items-center gap-1">
-                            <Layers size={12} />
-                            Carnê de {group.payments.length}x
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">{group.description}</div>
+                          <div className="font-bold text-slate-900">{student?.name || 'Aluno Removido'}</div>
+                          <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide mt-1">Carnê de {group.payments.length}x</div>
                         </td>
                         <td className="px-6 py-5 text-slate-600 text-sm font-medium">
-                          {group.payments.length > 0 && (
-                            <>
-                              <span className="text-xs text-slate-400 block">Início: {new Date(group.payments[0].dueDate).toLocaleDateString('pt-BR')}</span>
-                              <span className="text-xs text-slate-400 block">Fim: {new Date(group.payments[group.payments.length - 1].dueDate).toLocaleDateString('pt-BR')}</span>
-                            </>
-                          )}
+                          {group.payments.length > 0 && <span>Fim: {new Date(group.payments[group.payments.length - 1].dueDate).toLocaleDateString('pt-BR')}</span>}
                         </td>
                         <td className="px-6 py-5">
                           <div className="font-black text-slate-900">R$ {group.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                          <div className="text-[10px] text-slate-500 font-medium">Total do Carnê</div>
                         </td>
                         <td className="px-6 py-5">
                           <span className="inline-flex items-center gap-1 text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider">
@@ -753,60 +603,39 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                           </span>
                         </td>
                         <td className="px-6 py-5 text-right flex justify-end gap-2">
-                          <button 
-                            onClick={() => toggleInstallment(group.installmentId)}
-                            className="px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors inline-flex items-center gap-1.5"
-                          >
-                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                            {isExpanded ? 'Ocultar' : 'Ver Parcelas'}
+                          <button onClick={() => toggleInstallment(group.installmentId)} className="px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-50 inline-flex items-center gap-1.5">
+                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {isExpanded ? 'Ocultar' : 'Ver'}
                           </button>
-                          <button 
-                            onClick={() => handleOpenPaymentLink(group.installmentId, 'carne')}
-                            className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors inline-flex items-center gap-1.5 border border-indigo-100"
-                          >
+                          <button onClick={() => handleOpenPaymentLink(group.installmentId, 'carne')} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 border border-indigo-100 inline-flex items-center gap-1.5">
                             <Printer size={14} /> Imprimir Carnê
                           </button>
-                          <button onClick={() => openDelete({ ...group.payments[0], id: group.installmentId, installmentId: group.installmentId, asaasIdParaExcluir: group.installmentId } as any)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir Carnê Completo (Asaas)"><Trash2 size={18} /></button>
+                          <button onClick={() => openDelete({ ...group.payments[0], id: group.installmentId, installmentId: group.installmentId, asaasIdParaExcluir: group.installmentId } as any)} className="p-2 text-slate-400 hover:text-red-600 transition-all"><Trash2 size={18} /></button>
                         </td>
                       </tr>
                       {isExpanded && group.payments.map(payment => (
                         <tr key={payment.id} className="hover:bg-indigo-50/10 transition-colors bg-white">
-                          <td className="px-6 py-4 pl-12 relative">
-                            <div className="absolute left-6 top-0 bottom-0 w-px bg-slate-200"></div>
-                            <div className="absolute left-6 top-1/2 w-4 h-px bg-slate-200"></div>
-                            <div className="text-[10px] font-black text-slate-500 uppercase tracking-wide">
-                              Parcela {payment.installmentNumber}/{payment.totalInstallments}
-                            </div>
+                          <td className="px-6 py-4 pl-12 text-[10px] font-black text-slate-500 uppercase">
+                            Parcela {payment.installmentNumber}/{payment.totalInstallments}
                           </td>
-                          <td className="px-6 py-4 text-slate-600 text-sm font-medium">
-                            {new Date(payment.dueDate).toLocaleDateString('pt-BR')}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-slate-700">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                          </td>
+                          <td className="px-6 py-4 text-slate-600 text-sm font-medium">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
+                          <td className="px-6 py-4 font-bold text-slate-700">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                           <td className="px-6 py-4">{getStatusBadge(payment)}</td>
                           <td className="px-6 py-4 text-right flex justify-end gap-2">
                             {payment.asaasPaymentId && (
                               <>
                                 {(payment.status === 'pending' || payment.status === 'overdue') && (
-                                  <button 
-                                    onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')}
-                                    className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"
-                                  >
+                                  <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-bold hover:bg-slate-200 inline-flex items-center gap-1.5">
                                     <Barcode size={12} /> Boleto
                                   </button>
                                 )}
                                 {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
-                                  <button 
-                                    onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')}
-                                    className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"
-                                  >
+                                  <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-100 border border-emerald-100 inline-flex items-center gap-1.5">
                                     <Receipt size={12} /> Recibo
                                   </button>
                                 )}
                               </>
                             )}
-                            <button onClick={() => openDelete(payment)} className="p-1.5 text-slate-400 hover:text-red-600 transition-all" title="Excluir Parcela"><Trash2 size={14} /></button>
+                            <button onClick={() => openDelete(payment)} className="p-1.5 text-slate-400 hover:text-red-600"><Trash2 size={14} /></button>
                           </td>
                         </tr>
                       ))}
@@ -821,59 +650,36 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                       <td className="px-6 py-5">
                         <div className="font-bold text-slate-900 flex items-center gap-2">
                           {student?.name || 'Aluno Removido'}
-                          <button onClick={() => student && openHistory(student.id)} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Ver Histórico do Aluno">
-                            <Eye size={14} />
-                          </button>
+                          <button onClick={() => student && openHistory(student.id)} className="text-slate-400 hover:text-indigo-600"><Eye size={14} /></button>
                         </div>
                         <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wide">
                           {payment.type === 'registration' ? 'Matrícula' : 'Mensalidade'} 
                           {payment.installmentNumber && <span> {payment.installmentNumber}/{payment.totalInstallments}</span>}
                         </div>
-                        {payment.description && <div className="text-[10px] text-slate-400 mt-0.5">{payment.description}</div>}
                       </td>
-                      <td className="px-6 py-5 text-slate-600 text-sm font-medium">
-                        {new Date(payment.dueDate).toLocaleDateString('pt-BR')}
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="font-black text-slate-900">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        {payment.discount && payment.discount > 0 && (
-                          <div className="text-[10px] text-emerald-600 font-bold">- Desc: R$ {payment.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        )}
-                      </td>
+                      <td className="px-6 py-5 text-slate-600 text-sm font-medium">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
+                      <td className="px-6 py-5 font-black text-slate-900">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                       <td className="px-6 py-5">{getStatusBadge(payment)}</td>
                       <td className="px-6 py-5 text-right flex justify-end gap-2">
                         {payment.asaasPaymentId && (
                           <>
                             {(payment.status === 'pending' || payment.status === 'overdue') && (
-                              <button 
-                                onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')}
-                                className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors inline-flex items-center gap-1.5"
-                              >
+                              <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'boleto')} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 inline-flex items-center gap-1.5">
                                 <Barcode size={14} /> Boleto
                               </button>
                             )}
                             {(payment.status === 'paid' || payment.status === 'received' || payment.status === 'confirmed') && (
-                              <button 
-                                onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')}
-                                className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors inline-flex items-center gap-1.5 border border-emerald-100"
-                              >
+                              <button onClick={() => handleOpenPaymentLink(payment.asaasPaymentId!, 'recibo')} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 border border-emerald-100 inline-flex items-center gap-1.5">
                                 <Receipt size={14} /> Recibo
                               </button>
                             )}
                           </>
                         )}
-                        <button onClick={() => openDelete(payment)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir"><Trash2 size={18} /></button>
+                        <button onClick={() => openDelete(payment)} className="p-2 text-slate-400 hover:text-red-600"><Trash2 size={18} /></button>
                       </td>
                     </tr>
                   );
                 })
-              )}
-              {((filterType === 'parcelamentos' && groupedInstallments.length === 0) || (filterType !== 'parcelamentos' && filteredPayments.length === 0)) && (
-                <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center text-slate-400 italic">
-                    Nenhum lançamento encontrado para os filtros selecionados.
-                  </td>
-                </tr>
               )}
             </tbody>
           </table>
@@ -882,46 +688,32 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
 
       {/* NEW PAYMENT MODAL */}
       {isModalOpen && (
-        <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto transition-opacity duration-400 ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
-          <div className={`bg-white rounded-xl w-full max-w-lg shadow-2xl my-auto transition-all duration-400 relative overflow-hidden ${isClosing ? 'animate-slide-down-fade-out' : 'animate-slide-up'}`}>
-            <div className="bg-indigo-600 h-1.5 w-full absolute top-0 left-0 z-10"></div>
-            
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
-              <div>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight">Novo Lançamento</h3>
-                <p className="text-xs text-slate-500">Registre cobranças manuais ou parceladas.</p>
-              </div>
-              <button onClick={closeModal} className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-lg shadow-sm transition-all hover:rotate-90"><X size={20} /></button>
+        <div className={`fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 overflow-y-auto ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className="bg-white rounded-xl w-full max-w-lg shadow-2xl relative overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between bg-indigo-50/30">
+              <h3 className="text-xl font-black text-slate-800">Novo Lançamento</h3>
+              <button onClick={closeModal} className="text-slate-400 hover:text-red-500"><X size={20} /></button>
             </div>
             <form onSubmit={handleCreatePayment} className="p-6 space-y-4">
               <SearchableSelect
                 label="Aluno Beneficiário"
                 placeholder="Selecione o aluno..."
                 required
-                options={data.students.map(s => ({
-                  id: s.id,
-                  name: s.name,
-                  subtext: data.classes.find(c => c.id === s.classId)?.name || 'Sem Turma'
-                }))}
+                options={data.students.map(s => ({ id: s.id, name: s.name }))}
                 value={formData.studentId}
                 onChange={val => setFormData({...formData, studentId: val})}
               />
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Referente a (Opcional)</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Referente a</label>
                 <select className={inputClass + " w-full"} value={selectedItemId} onChange={handleItemSelect}>
-                  <option value="">Lançamento Avulso / Personalizado</option>
-                  <option value="registration_fee">Taxa de Matrícula Padrão</option>
-                  <optgroup label="Cursos">
-                    {data.courses?.map(c => <option key={`course_${c.id}`} value={`course_${c.id}`}>{c.name} - R$ {c.monthlyFee.toFixed(2)}</option>)}
-                  </optgroup>
-                  <optgroup label="Apostilas">
-                    {data.handouts?.map(h => <option key={`handout_${h.id}`} value={`handout_${h.id}`}>{h.name} - R$ {h.price.toFixed(2)}</option>)}
-                  </optgroup>
+                  <option value="">Avulso / Personalizado</option>
+                  <option value="registration_fee">Matrícula</option>
+                  <optgroup label="Cursos">{data.courses?.map(c => <option key={c.id} value={`course_${c.id}`}>{c.name}</option>)}</optgroup>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Tipo</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Tipo</label>
                   <select className={inputClass + " w-full"} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}>
                     <option value="monthly">Mensalidade</option>
                     <option value="registration">Matrícula</option>
@@ -929,51 +721,141 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1 flex items-center gap-1"><Hash size={12}/> Qtd. Parcelas</label>
-                  <input type="number" min="1" max="100" required className={inputClass + " w-full"} value={manualInstallments} onChange={e => setManualInstallments(parseInt(e.target.value) || 1)} />
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Qtd. Parcelas</label>
+                  <input type="number" min="1" max="100" className={inputClass + " w-full"} value={manualInstallments} onChange={e => setManualInstallments(parseInt(e.target.value) || 1)} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Valor Base (R$)</label>
-                  <input type="number" step="0.01" required className={inputClass + " w-full"} value={formData.amount} onChange={e => setFormData({...formData, amount: parseFloat(e.target.value)})} />
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Valor Base (R$)</label>
+                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.amount} onChange={e => setFormData({...formData, amount: parseFloat(e.target.value)})} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1 flex items-center gap-1"><Tag size={12}/> Desconto (R$)</label>
-                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.discount} onChange={e => setFormData({...formData, discount: parseFloat(e.target.value)})} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Multa (%)</label>
-                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.fine} onChange={e => setFormData({...formData, fine: parseFloat(e.target.value) || 0})} />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Juros ao Mês (%)</label>
-                  <input type="number" step="0.01" className={inputClass + " w-full"} value={formData.interest} onChange={e => setFormData({...formData, interest: parseFloat(e.target.value) || 0})} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Data Vencimento Inicial</label>
-                <input 
-                  required 
-                  placeholder="DD/MM/AAAA" 
-                  className={inputClass + " w-full"} 
-                  value={dueDateDisplay} 
-                  onChange={e => {
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Vencimento</label>
+                  <input className={inputClass + " w-full"} value={dueDateDisplay} onChange={e => {
                     const masked = formatDateMask(e.target.value);
                     setDueDateDisplay(masked);
-                    if (masked.length === 10) {
-                      setFormData(prev => ({...prev, dueDate: dateBrToIso(masked)}));
-                    }
-                  }} 
-                  maxLength={10}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Descrição</label>
-                <input placeholder="Ex: Referente a Janeiro/2024" className={inputClass + " w-full"} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+                    if (masked.length === 10) setFormData(prev => ({...prev, dueDate: dateBrToIso(masked)}));
+                  }} maxLength={10} />
+                </div>
               </div>
               <div className="pt-4 flex gap-4">
-                <button type="button" onClick={closeModal} className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors font-bold text-xs">Cancelar</button>
-                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text
+                <button type="button" onClick={closeModal} className="flex-1 py-3 border border-slate-200 rounded-xl text-slate-600 font-bold text-xs">Cancelar</button>
+                <button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold text-xs">Gerar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteModal && paymentToDelete && (
+        <div className={`fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 overflow-y-auto ${isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in'}`}>
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl relative overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 size={24} /></div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">Excluir Pagamento</h3>
+              
+              <div className="flex flex-col gap-2 mt-6">
+                {paymentToDelete.id && typeof paymentToDelete.id === 'string' && paymentToDelete.id.startsWith('inst_') ? (
+                  <button onClick={() => handleDelete('all')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm">Excluir Carnê Completo</button>
+                ) : (
+                  <>
+                    <button onClick={() => handleDelete('single')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm">Excluir Apenas Esta Parcela</button>
+                    {(paymentToDelete.installmentId || paymentToDelete.totalInstallments) && (
+                      <button onClick={() => handleDelete('all')} className="w-full py-3 border-2 border-red-100 text-red-600 rounded-xl font-bold text-sm">Excluir Carnê Completo (Asaas)</button>
+                    )}
+                  </>
+                )}
+                <button onClick={closeModal} className="w-full py-3 text-slate-400 font-bold text-sm">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FALLBACK CARNE MODAL (Boletos individuais puxando código de barras do Asaas) */}
+      {showFallbackModal && (
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl w-full max-w-3xl shadow-2xl relative overflow-hidden">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <div>
+                <h3 className="text-2xl font-black text-slate-800">Carnê Digital</h3>
+                <p className="text-sm text-slate-500">O PDF unificado não está disponível. Acesse os boletos individuais.</p>
+              </div>
+              <button onClick={() => setShowFallbackModal(false)} className="text-slate-400 hover:text-red-500"><X size={24} /></button>
+            </div>
+            
+            <div className="p-8 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {fallbackInstallments.map((parcela) => (
+                  <div key={parcela.id} className="border border-slate-200 rounded-xl p-4 shadow-sm">
+                    <div className="flex justify-between">
+                      <div>
+                        <div className="text-xs font-black text-indigo-500 uppercase">Parcela {parcela.numero}</div>
+                        <div className="text-lg font-bold text-slate-800">R$ {parcela.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">Vencimento</div>
+                        <div className="text-sm font-bold text-slate-700">{new Date(parcela.vencimento).toLocaleDateString('pt-BR')}</div>
+                      </div>
+                    </div>
+                    
+                    <div className="pt-3 mt-3 border-t border-slate-100 flex justify-between items-center">
+                      <span className="text-[10px] font-black uppercase text-emerald-600">Disponível</span>
+                      {parcela.asaasPaymentId ? (
+                        <button onClick={() => handleOpenPaymentLink(parcela.asaasPaymentId, 'boleto')} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1">
+                          <Barcode size={14} /> Abrir Boleto
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">Boleto não gerado</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowFallbackModal(false)} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl">Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRINT CARNE MODAL */}
+      {showPrintCarneModal && (
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl relative overflow-hidden">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-indigo-50/30">
+              <h3 className="text-2xl font-black text-slate-800">Imprimir Carnê</h3>
+              <button onClick={() => setShowPrintCarneModal(false)} className="text-slate-400 hover:text-red-500"><X size={24} /></button>
+            </div>
+            
+            <div className="p-8 space-y-8">
+              <SearchableSelect
+                label="Aluno"
+                placeholder="Selecione o aluno..."
+                required
+                options={data.students.map(s => ({ id: s.id, name: s.name }))}
+                value={selectedStudentForCarne}
+                onChange={setSelectedStudentForCarne}
+              />
+              <div className="flex justify-end gap-4 pt-4 border-t border-slate-100">
+                <button onClick={() => setShowPrintCarneModal(false)} className="px-6 py-3 text-slate-600 font-bold rounded-xl">Cancelar</button>
+                <button 
+                  onClick={() => { handlePrintCarne(selectedStudentForCarne); setShowPrintCarneModal(false); setSelectedStudentForCarne(''); }}
+                  disabled={!selectedStudentForCarne || isFetchingCarne}
+                  className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl flex items-center gap-2"
+                >
+                  {isFetchingCarne ? <RefreshCw size={20} className="animate-spin" /> : <Printer size={20} />} Imprimir Carnê
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Finance;
