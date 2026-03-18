@@ -1,265 +1,583 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SchoolData, Payment, Student } from '../types';
 import { useDialog } from '../DialogContext';
 import SearchableSelect from './SearchableSelect';
-import { CheckCircle, Clock, AlertCircle, RefreshCw, Filter, Plus, X, Printer, Tag, Hash, User, BookOpen, Trash2, Eye, Barcode, Receipt, Layers, ChevronUp, ChevronDown } from 'lucide-react';
+import { CheckCircle, Clock, AlertCircle, RefreshCw, Filter, DollarSign, Plus, X, Download, FileSignature, Printer, Tag, Hash, User, BookOpen, Trash2, Eye, Calendar, AlertTriangle, Barcode, Receipt, Layers, ChevronUp, ChevronDown } from 'lucide-react';
+import { pdfService } from '../services/pdfService';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
-interface FinanceProps { data: SchoolData; updateData: (newData: Partial<SchoolData>) => void; }
+interface FinanceProps {
+  data: SchoolData;
+  updateData: (newData: Partial<SchoolData>) => void;
+}
 
 const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
   const { showAlert } = useDialog();
-  const [filterStatus, setFilterStatus] = useState<'all'|'pending'|'paid'|'overdue'>('all');
-  const [filterType, setFilterType] = useState<'all'|'avulsas'|'parcelamentos'>('all');
-  const [expandedInst, setExpandedInst] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'avulsas' | 'parcelamentos'>('all');
+  const [expandedInstallments, setExpandedInstallments] = useState<string[]>([]);
   const [filterStudent, setFilterStudent] = useState<string>('all');
   const [filterClass, setFilterClass] = useState<string>('all');
+  
+  // Modais states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [showHist, setShowHist] = useState(false);
-  const [showDel, setShowDel] = useState(false);
-  const [showPrint, setShowPrint] = useState(false);
-  const [selHist, setSelHist] = useState<Student | null>(null);
-  const [selCarne, setSelCarne] = useState<string>('');
-  const [payToDel, setPayToDel] = useState<Payment | null>(null);
-  const [isSync, setIsSync] = useState(false);
-  const [isFetchCarne, setIsFetchCarne] = useState(false);
-  const [showFallback, setShowFallback] = useState(false);
-  const [fallbackInst, setFallbackInst] = useState<any[]>([]);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showPrintCarneModal, setShowPrintCarneModal] = useState(false);
+  
+  // Selection states
+  const [selectedStudentHistory, setSelectedStudentHistory] = useState<Student | null>(null);
+  const [selectedStudentForCarne, setSelectedStudentForCarne] = useState<string>('');
+  const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isFetchingCarne, setIsFetchingCarne] = useState(false);
 
-  useEffect(() => { syncAsaas(); }, []);
-  const dataRef = useRef(data.payments);
-  useEffect(() => { dataRef.current = data.payments; }, [data.payments]);
+  React.useEffect(() => {
+    syncAsaasPayments();
+  }, []);
 
-  const handleLink = async (id: string, type: 'boleto'|'recibo'|'carne') => {
-    if (!id) return showAlert('Erro', 'ID inválido para esta operação.', 'error');
+  const [showFallbackModal, setShowFallbackModal] = useState(false);
+  const [fallbackInstallments, setFallbackInstallments] = useState<any[]>([]);
+
+  const handleOpenPaymentLink = async (id: string, type: 'boleto' | 'recibo' | 'carne') => {
     try {
       showAlert('Aguarde', `Buscando ${type}...`, 'info');
+      
       if (type === 'carne') {
-        const res = await fetch(`/api/parcelamentos/${id}/carne`);
-        const result = await res.json();
-        if (res.ok) {
-          if (result.type === 'fallback') { setFallbackInst(result.boletos); setShowFallback(true); showAlert('Atenção', result.message, 'info'); } 
-          else if (result.url) { window.open(result.url, '_blank'); showAlert('Sucesso', 'Carnê localizado!', 'success'); }
-        } else showAlert('Erro', result.error || 'Falha ao buscar', 'error');
+        const response = await fetch(`/api/parcelamentos/${id}/carne`);
+        const result = await response.json();
+
+        if (response.ok) {
+          if (result.type === 'fallback') {
+            setFallbackInstallments(result.boletos);
+            setShowFallbackModal(true);
+            showAlert('Atenção', result.message, 'info');
+          } else if (result.type === 'pdf' && result.url) {
+            window.open(result.url, '_blank', 'noopener,noreferrer');
+            showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+          }
+        } else {
+          showAlert('Erro', result.error || 'Falha ao buscar carnê.', 'error');
+        }
         return;
       }
-      const res = await fetch(`/api/cobrancas/${id}/link`);
-      const result = await res.json();
-      if (res.ok) {
+
+      const response = await fetch(`/api/cobrancas/${id}/link`);
+      const result = await response.json();
+
+      if (response.ok) {
         const url = type === 'boleto' ? result.bankSlipUrl : result.transactionReceiptUrl;
-        if (url) window.open(url, '_blank'); else showAlert('Atenção', 'Indisponível no momento.', 'warning');
-      } else showAlert('Erro', result.error || 'Falha', 'error');
-    } catch (e) { showAlert('Erro', 'Erro ao processar.', 'error'); }
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } else {
+          showAlert('Atenção', `${type === 'boleto' ? 'Boleto' : 'Recibo'} não disponível.`, 'warning');
+        }
+      } else {
+        showAlert('Erro', result.error || `Falha ao buscar ${type}.`, 'error');
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar ${type}:`, error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    }
   };
 
-  const handlePrint = async (stdId: string) => {
-    setIsFetchCarne(true);
+  const handlePrintCarne = async (studentId: string) => {
+    setIsFetchingCarne(true);
     try {
-      const res = await fetch(`/api/alunos/${stdId}/carne`);
-      const result = await res.json();
-      if (res.ok) {
-        if (result.type === 'fallback') { setFallbackInst(result.boletos); setShowFallback(true); showAlert('Atenção', result.message, 'info'); } 
-        else if (result.url) { window.open(result.url, '_blank'); showAlert('Sucesso', 'Carnê localizado!', 'success'); }
-      } else showAlert('Atenção', result.error || 'Não encontrado.', 'warning');
-    } catch (e) { showAlert('Erro', 'Erro interno.', 'error'); } 
-    finally { setIsFetchCarne(false); }
+      const response = await fetch(`/api/alunos/${studentId}/carne`);
+      const result = await response.json();
+
+      if (response.ok) {
+        if (result.type === 'fallback') {
+          setFallbackInstallments(result.boletos);
+          setShowFallbackModal(true);
+          showAlert('Atenção', result.message, 'info');
+        } else if (result.type === 'pdf' && result.url) {
+          window.open(result.url, '_blank', 'noopener,noreferrer');
+          showAlert('Sucesso', 'Carnê localizado com sucesso!', 'success');
+        }
+      } else {
+        showAlert('Atenção', result.error || 'Não foi possível encontrar o carnê deste aluno.', response.status === 400 ? 'warning' : 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar carnê:', error);
+      showAlert('Erro', 'Ocorreu um erro ao processar sua solicitação.', 'error');
+    } finally {
+      setIsFetchingCarne(false);
+    }
   };
 
-  const syncAsaas = async () => {
-    if (!isSupabaseConfigured() || isSync) return;
-    setIsSync(true);
+  const dataPaymentsRef = React.useRef(data.payments);
+  React.useEffect(() => {
+    dataPaymentsRef.current = data.payments;
+  }, [data.payments]);
+
+  const syncAsaasPayments = async () => {
+    if (!isSupabaseConfigured() || isSyncing) return;
+    
+    setIsSyncing(true);
     try {
-      const { data: cp, error } = await supabase.from('alunos_cobrancas').select('*');
+      const { data: cloudPayments, error } = await supabase
+        .from('alunos_cobrancas')
+        .select('asaas_payment_id, status, aluno_id, valor, vencimento, data_pagamento, installment, asaas_installment_id, link_boleto');
+
       if (error) throw error;
-      if (cp && cp.length > 0) {
-        let count = 0;
-        const current = dataRef.current;
-        const updated = current.map(p => {
-          const m = cp.find(c => p.asaasPaymentId ? c.asaas_payment_id === p.asaasPaymentId : (c.aluno_id === p.studentId && Math.abs(c.valor - p.amount) < 0.01 && c.vencimento === p.dueDate));
-          if (m) {
-            const st = (m.status || '').toLowerCase();
-            const nSt = st === 'pago' ? 'paid' : st === 'atrasado' ? 'overdue' : st === 'cancelado' ? 'cancelled' : 'pending';
-            if (p.status !== nSt || p.installmentId !== (m.asaas_installment_id || m.installment) || p.asaasPaymentId !== m.asaas_payment_id) {
-              count++;
-              return { ...p, status: nSt as any, amount: m.valor, paidDate: m.data_pagamento || p.paidDate, installmentId: m.asaas_installment_id || m.installment || p.installmentId, asaasPaymentUrl: m.link_boleto || p.asaasPaymentUrl, asaasPaymentId: m.asaas_payment_id || p.asaasPaymentId };
+
+      if (cloudPayments && cloudPayments.length > 0) {
+        let updatedCount = 0;
+        const currentPayments = dataPaymentsRef.current;
+        const updatedPayments = currentPayments.map(p => {
+          const match = cloudPayments.find(cp => {
+            if (p.asaasPaymentId) {
+              return cp.asaas_payment_id === p.asaasPaymentId;
+            }
+            return cp.aluno_id === p.studentId && 
+                   Math.abs(cp.valor - p.amount) < 0.01 && 
+                   cp.vencimento === p.dueDate;
+          });
+          
+          if (match) {
+            const statusStr = (match.status || '').toLowerCase();
+            const newStatus = statusStr === 'pago' ? 'paid' : 
+                             statusStr === 'atrasado' ? 'overdue' : 
+                             statusStr === 'cancelado' ? 'cancelled' : 'pending';
+            
+            if (p.status !== newStatus || p.amount !== match.valor || p.installmentId !== (match.asaas_installment_id || match.installment) || p.asaasPaymentUrl !== match.link_boleto || p.asaasPaymentId !== match.asaas_payment_id) {
+              updatedCount++;
+              return { 
+                ...p, 
+                status: newStatus as any, 
+                amount: match.valor,
+                paidDate: match.data_pagamento || p.paidDate,
+                installmentId: match.asaas_installment_id || match.installment || p.installmentId,
+                asaasPaymentUrl: match.link_boleto || p.asaasPaymentUrl,
+                asaasPaymentId: match.asaas_payment_id || p.asaasPaymentId
+              };
             }
           }
           return p;
         });
-        if (count > 0) { updateData({ payments: updated }); showAlert('Sincronização', `${count} itens atualizados.`, 'success'); }
-      }
-    } catch (e) {} finally { setIsSync(false); }
-  };
 
-  const [manualInst, setManualInst] = useState(1);
-  const [dueDisp, setDueDisp] = useState(new Date().toLocaleDateString('pt-BR'));
-  const [selItem, setSelItem] = useState('');
-  const [formData, setFormData] = useState({ studentId: '', amount: 150, discount: 0, fine: 0, interest: 0, dueDate: new Date().toISOString().split('T')[0], type: 'monthly', description: '' });
+        if (updatedCount > 0) {
+          updateData({ payments: updatedPayments });
+          
+          const hasOverdue = updatedPayments.some((p, idx) => {
+            const oldP = currentPayments[idx];
+            return oldP && oldP.status !== 'overdue' && p.status === 'overdue';
+          });
+          
+          const hasPaid = updatedPayments.some((p, idx) => {
+            const oldP = currentPayments[idx];
+            return oldP && oldP.status !== 'paid' && p.status === 'paid';
+          });
 
-  useEffect(() => {
-    if (formData.studentId) {
-      const st = data.students.find(s => s.id === formData.studentId);
-      if (st) {
-        let f = 0, i = 0;
-        if (selItem.startsWith('course_')) { const c = data.courses.find(x => x.id === selItem.replace('course_','')); f = c?.finePercentage||0; i = c?.interestPercentage||0; } 
-        else if (selItem.startsWith('handout_')) { const h = data.handouts?.find(x => x.id === selItem.replace('handout_','')); f = h?.finePercentage||0; i = h?.interestPercentage||0; } 
-        else { const cl = data.classes.find(x => x.id === st.classId); const c = data.courses.find(x => x.id === cl?.courseId); f = c?.finePercentage||0; i = c?.interestPercentage||0; }
-        setFormData(p => ({ ...p, fine: f, interest: i }));
-      }
-    }
-  }, [formData.studentId, selItem, data]);
+          let message = `${updatedCount} pagamento(s) atualizado(s).`;
+          if (hasPaid && !hasOverdue) message = 'Pagamento confirmado e registrado.';
+          if (hasOverdue && !hasPaid) message = 'Status atualizado para Atrasado.';
+          if (hasPaid && hasOverdue) message = 'Pagamentos e atrasos atualizados.';
 
-  const fMask = (v: string) => v.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2').replace(/(\d{2})(\d)/, '$1/$2').slice(0, 10);
-  const isoDt = (br: string) => br.length===10 ? `${br.split('/')[2]}-${br.split('/')[1]}-${br.split('/')[0]}` : '';
-
-  const filtP = data.payments.filter(p => {
-    const s1 = filterStatus === 'all' || p.status === filterStatus;
-    const s2 = filterStudent === 'all' || p.studentId === filterStudent;
-    const cl = filterClass === 'all' || data.students.find(s=>s.id===p.studentId)?.classId === filterClass;
-    const tp = filterType === 'all' || (filterType === 'avulsas' && !p.installmentId) || (filterType === 'parcelamentos' && !!p.installmentId);
-    return s1 && s2 && cl && tp;
-  }).sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
-
-  const groups = useMemo(() => {
-    if (filterType !== 'parcelamentos') return [];
-    const grps: Record<string, Payment[]> = {};
-    filtP.forEach(p => { if (p.installmentId) { if (!grps[p.installmentId]) grps[p.installmentId] = []; grps[p.installmentId].push(p); } });
-    return Object.entries(grps).map(([id, pts]) => {
-      const s = pts.sort((a, b) => (a.installmentNumber||0) - (b.installmentNumber||0));
-      return { id, pts: s, stId: s[0].studentId, tot: s.reduce((a,b)=>a+b.amount,0), desc: s[0].description?.split(' (')[0]||'Carnê' };
-    }).sort((a, b) => new Date(b.pts[0].dueDate).getTime() - new Date(a.pts[0].dueDate).getTime());
-  }, [filtP, filterType]);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.studentId || formData.amount <= 0) return showAlert('Atenção', 'Selecione aluno e valor', 'warning');
-    const st = data.students.find(s => s.id === formData.studentId);
-    if (!st) return;
-
-    const nP: Payment[] = [];
-    const bD = new Date(dueDisp.length === 10 ? isoDt(dueDisp) : formData.dueDate);
-
-    for (let i = 0; i < manualInst; i++) {
-      const d = new Date(bD); d.setMonth(bD.getMonth() + i);
-      nP.push({ ...formData, lateFee: formData.fine, dueDate: d.toISOString().split('T')[0], id: crypto.randomUUID(), amount: formData.amount, status: 'pending', installmentNumber: manualInst>1?i+1:undefined, totalInstallments: manualInst>1?manualInst:undefined, description: manualInst>1?`${formData.description} (${i+1}/${manualInst})`:formData.description } as any);
-    }
-
-    try {
-      const res = await fetch('/api/gerar_cobranca', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aluno_id: st.id, nome: st.name, cpf: (st.cpf||st.guardianCpf||'').replace(/\D/g,''), email: st.email, valor: formData.amount, vencimento: nP[0].dueDate, multa: formData.fine, juros: formData.interest, desconto: formData.discount, telefone: st.phone, cep: st.addressZip, endereco: st.addressStreet, numero: st.addressNumber, bairro: st.addressNeighborhood, descricao: formData.description, parcelas: manualInst })
-      });
-      if (res.ok) {
-        const ad = await res.json();
-        if (ad.payments?.length > 0) {
-          nP.forEach((p, i) => { const ap = ad.payments[i]||ad.payments[ad.payments.length-1]; p.asaasPaymentUrl = ap.link_boleto; p.asaasPaymentId = ap.asaas_payment_id; if (ad.installment) p.installmentId = ad.installment; });
+          showAlert('Sincronização', message, 'success');
         }
       }
-    } catch (e) { showAlert('Aviso', 'Salvo só local.', 'warning'); }
-    updateData({ payments: [...data.payments, ...nP] });
-    showAlert('Sucesso', 'Gerado!', 'success'); closeMod();
+    } catch (error) {
+      console.error('Erro ao sincronizar pagamentos:', error);
+      showAlert('Erro', 'Falha ao sincronizar com o Asaas.', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  const closeMod = () => {
-    setIsClosing(true);
-    setTimeout(() => { setIsModalOpen(false); setShowHist(false); setShowDel(false); setIsClosing(false); setManualInst(1); setDueDisp(new Date().toLocaleDateString('pt-BR')); setFormData({ studentId: '', amount: 150, discount: 0, fine: 0, interest: 0, dueDate: new Date().toISOString().split('T')[0], type: 'monthly', description: '' }); setSelHist(null); setPayToDel(null); }, 300);
+  const [manualInstallments, setManualInstallments] = useState(1);
+  const [dueDateDisplay, setDueDateDisplay] = useState(new Date().toLocaleDateString('pt-BR'));
+  const [selectedItemId, setSelectedItemId] = useState<string>('');
+  const [selectedItemType, setSelectedItemType] = useState<'course' | 'handout' | ''>('');
+  
+  const [formData, setFormData] = useState<Omit<Payment, 'id' | 'status' | 'paidDate' | 'lateFee'> & { fine: number }>({
+    studentId: '',
+    amount: 150,
+    discount: 0,
+    discountType: 'fixed',
+    fine: 0,
+    interest: 0,
+    dueDate: new Date().toISOString().split('T')[0],
+    type: 'monthly',
+    description: ''
+  });
+
+  React.useEffect(() => {
+    if (formData.studentId) {
+      const student = data.students.find(s => s.id === formData.studentId);
+      if (student) {
+        let fine = 0;
+        let interest = 0;
+
+        if (selectedItemId) {
+          if (selectedItemId.startsWith('course_')) {
+            const course = data.courses.find(c => c.id === selectedItemId.replace('course_', ''));
+            fine = course?.finePercentage || 0;
+            interest = course?.interestPercentage || 0;
+          } else if (selectedItemId.startsWith('handout_')) {
+            const handout = data.handouts?.find(h => h.id === selectedItemId.replace('handout_', ''));
+            fine = handout?.finePercentage || 0;
+            interest = handout?.interestPercentage || 0;
+          }
+        } else {
+          const studentClass = data.classes.find(c => c.id === student.classId);
+          const course = data.courses.find(c => c.id === studentClass?.courseId);
+          fine = course?.finePercentage || 0;
+          interest = course?.interestPercentage || 0;
+        }
+
+        setFormData(prev => ({
+          ...prev,
+          fine: fine,
+          interest: interest
+        }));
+      }
+    }
+  }, [formData.studentId, selectedItemId, data.students, data.classes, data.courses, data.handouts]);
+
+  const formatDateMask = (val: string) => {
+    return val.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2').replace(/(\d{2})(\d)/, '$1/$2').slice(0, 10);
   };
 
-  const del = async (type: 'single' | 'all') => {
-    if (!payToDel) return;
-    const id = type === 'all' ? (payToDel.installmentId || (payToDel as any).asaasIdParaExcluir || payToDel.id) : (payToDel.asaasPaymentId || payToDel.id);
-    if (!id) return showAlert('Erro', 'ID não encontrado', 'error');
+  const dateBrToIso = (br: string) => {
+    if (br.length !== 10) return '';
+    const [d, m, y] = br.split('/');
+    return `${y}-${m}-${d}`;
+  };
+
+  const filteredPayments = data.payments
+    .filter(p => {
+      const statusMatch = filterStatus === 'all' || p.status === filterStatus;
+      const studentMatch = filterStudent === 'all' || p.studentId === filterStudent;
+      
+      let classMatch = true;
+      if (filterClass !== 'all') {
+        const student = data.students.find(s => s.id === p.studentId);
+        classMatch = student?.classId === filterClass;
+      }
+
+      let typeMatch = true;
+      if (filterType === 'avulsas') {
+        typeMatch = !p.installmentId;
+      } else if (filterType === 'parcelamentos') {
+        typeMatch = !!p.installmentId;
+      }
+
+      return statusMatch && studentMatch && classMatch && typeMatch;
+    })
+    .sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+
+  const groupedInstallments = useMemo(() => {
+    if (filterType !== 'parcelamentos') return [];
+    
+    const groups: Record<string, Payment[]> = {};
+    filteredPayments.forEach(p => {
+      if (p.installmentId) {
+        if (!groups[p.installmentId]) groups[p.installmentId] = [];
+        groups[p.installmentId].push(p);
+      }
+    });
+    
+    return Object.entries(groups).map(([id, payments]) => {
+      const sorted = payments.sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
+      return {
+        installmentId: id,
+        payments: sorted,
+        studentId: sorted[0].studentId,
+        totalAmount: sorted.reduce((sum, p) => sum + p.amount, 0),
+        totalInstallments: sorted[0].totalInstallments || sorted.length,
+        description: sorted[0].description?.split(' (')[0] || 'Parcelamento',
+        dueDate: sorted[0].dueDate
+      };
+    }).sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+  }, [filteredPayments, filterType]);
+
+  const toggleInstallment = (id: string) => {
+    setExpandedInstallments(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleItemSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setSelectedItemId(val);
+    
+    if (!val) {
+      setSelectedItemType('');
+      setFormData(prev => ({...prev, amount: 0, description: ''}));
+      return;
+    }
+
+    if (val === 'registration_fee') {
+      setSelectedItemType('registration');
+      setFormData(prev => ({
+        ...formData,
+        amount: 150,
+        description: 'Taxa de Matrícula',
+        type: 'registration'
+      }));
+      return;
+    }
+
+    if (val.startsWith('course_')) {
+      const courseId = val.replace('course_', '');
+      const course = data.courses.find(c => c.id === courseId);
+      if (course) {
+        setSelectedItemType('course');
+        setFormData(prev => ({
+          ...prev, 
+          amount: course.monthlyFee, 
+          description: `Mensalidade - ${course.name}`,
+          type: 'monthly',
+          fine: course.finePercentage || 0,
+          interest: course.interestPercentage || 0
+        }));
+      }
+    } else if (val.startsWith('handout_')) {
+      const handoutId = val.replace('handout_', '');
+      const handout = data.handouts?.find(h => h.id === handoutId);
+      if (handout) {
+        setSelectedItemType('handout');
+        setFormData(prev => ({
+          ...prev, 
+          amount: handout.price, 
+          description: `Apostila - ${handout.name}`,
+          type: 'other',
+          fine: handout.finePercentage || 0,
+          interest: handout.interestPercentage || 0
+        }));
+      }
+    }
+  };
+
+  const handleCreatePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.studentId || formData.amount <= 0) {
+      showAlert('Atenção', '⚠️ Por favor, selecione um aluno e informe um valor válido.', 'warning');
+      return;
+    }
+
+    const student = data.students.find(s => s.id === formData.studentId);
+    if (!student) {
+      showAlert('Erro', 'Aluno não encontrado.', 'error');
+      return;
+    }
+
+    const newPayments: Payment[] = [];
+    
+    let baseDateStr = formData.dueDate;
+    if (dueDateDisplay.length === 10) {
+        baseDateStr = dateBrToIso(dueDateDisplay);
+    }
+    const baseDate = new Date(baseDateStr);
+
+    for (let i = 0; i < manualInstallments; i++) {
+      const dueDate = new Date(baseDate);
+      dueDate.setMonth(baseDate.getMonth() + i);
+
+      const baseAmount = formData.amount;
+      const { fine, ...rest } = formData;
+      const paymentDueDate = dueDate.toISOString().split('T')[0];
+      
+      newPayments.push({
+        ...rest,
+        lateFee: fine,
+        dueDate: paymentDueDate,
+        id: crypto.randomUUID(),
+        amount: baseAmount,
+        status: 'pending',
+        installmentNumber: manualInstallments > 1 ? i + 1 : undefined,
+        totalInstallments: manualInstallments > 1 ? manualInstallments : undefined,
+        description: manualInstallments > 1 
+          ? `${formData.description || 'Mensalidade'} (${i + 1}/${manualInstallments})`
+          : formData.description
+      });
+    }
+
     try {
-      showAlert('Aguarde', 'Limpando Asaas e Banco de Dados...', 'info');
-      const res = await fetch('/api/excluir_cobranca', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-      if (res.ok) {
+      const rawCpf = (student.cpf || student.guardianCpf || '').replace(/\D/g, '');
+      const isoDueDate = newPayments[0].dueDate;
+      
+      const response = await fetch('/api/gerar_cobranca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aluno_id: student.id,
+          nome: student.name,
+          cpf: rawCpf,
+          email: student.email,
+          valor: formData.amount,
+          vencimento: isoDueDate,
+          multa: formData.fine,
+          juros: formData.interest,
+          desconto: Number(formData.discount) || 0,
+          telefone: student.phone,
+          cep: student.addressZip,
+          endereco: student.addressStreet,
+          numero: student.addressNumber,
+          bairro: student.addressNeighborhood,
+          nascimento: student.birthDate,
+          descricao: formData.description || 'Mensalidade',
+          parcelas: manualInstallments
+        })
+      });
+
+      if (response.ok) {
+        const asaasData = await response.json();
+        
+        if (asaasData.payments && asaasData.payments.length > 0) {
+          newPayments.forEach((p, idx) => {
+            const asaasPayment = asaasData.payments[idx] || asaasData.payments[asaasData.payments.length - 1];
+            p.asaasPaymentUrl = asaasPayment.link_boleto;
+            p.asaasPaymentId = asaasPayment.asaas_payment_id;
+            if (asaasData.installment) {
+              p.installmentId = asaasData.installment;
+            }
+          });
+        }
+      } else {
+        throw new Error('Erro na resposta da API');
+      }
+    } catch (error) {
+      console.error('Erro ao conectar com o Asaas:', error);
+      showAlert('Atenção', 'Erro ao conectar com o Asaas. Lançamentos salvos apenas localmente.', 'warning');
+    }
+
+    let newDeliveries = [...(data.handoutDeliveries || [])];
+    if (selectedItemType === 'handout' && newPayments.length > 0) {
+      const handoutId = selectedItemId.replace('handout_', '');
+      const firstPayment = newPayments[0];
+      
+      const existingDeliveryIndex = newDeliveries.findIndex(d => d.studentId === student.id && d.handoutId === handoutId);
+      
+      if (existingDeliveryIndex >= 0) {
+        newDeliveries[existingDeliveryIndex] = {
+          ...newDeliveries[existingDeliveryIndex],
+          asaasPaymentId: firstPayment.asaasPaymentId,
+          asaasPaymentUrl: firstPayment.asaasPaymentUrl
+        };
+      } else {
+        newDeliveries.push({
+          id: crypto.randomUUID(),
+          studentId: student.id,
+          handoutId: handoutId,
+          deliveryStatus: 'pending',
+          paymentStatus: 'pending',
+          asaasPaymentId: firstPayment.asaasPaymentId,
+          asaasPaymentUrl: firstPayment.asaasPaymentUrl
+        });
+      }
+    }
+
+    updateData({ 
+      payments: [...data.payments, ...newPayments],
+      ...(selectedItemType === 'handout' ? { handoutDeliveries: newDeliveries } : {})
+    });
+    showAlert('Sucesso', 'Nova cobrança gerada com sucesso.', 'success');
+    closeModal();
+  };
+
+  const closeModal = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsModalOpen(false);
+      setShowHistoryModal(false);
+      setShowDeleteModal(false);
+      setIsClosing(false);
+      
+      setManualInstallments(1);
+      const today = new Date();
+      setDueDateDisplay(today.toLocaleDateString('pt-BR'));
+      setFormData({
+        studentId: '',
+        amount: 150,
+        discount: 0,
+        discountType: 'fixed',
+        fine: 0,
+        interest: 0,
+        dueDate: today.toISOString().split('T')[0],
+        type: 'monthly',
+        description: ''
+      });
+      setSelectedStudentHistory(null);
+      setPaymentToDelete(null);
+    }, 300);
+  };
+
+  // LOGICA CORRIGIDA: Identifica corretamente inst_ e pay_ para o Backend
+  const handleDelete = async (deleteType: 'single' | 'all') => {
+    if (!paymentToDelete) return;
+
+    let idToDelete = '';
+    
+    if (deleteType === 'all') {
+      idToDelete = paymentToDelete.installmentId || (paymentToDelete as any).asaasIdParaExcluir || paymentToDelete.id;
+    } else {
+      idToDelete = paymentToDelete.asaasPaymentId || paymentToDelete.id;
+    }
+
+    if (!idToDelete) {
+      showAlert('Erro', 'ID da cobrança não encontrado.', 'error');
+      return;
+    }
+
+    try {
+      showAlert('Aguarde', deleteType === 'all' ? 'Excluindo carnê completo...' : 'Excluindo parcela...', 'info');
+      const response = await fetch('/api/excluir_cobranca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: idToDelete })
+      });
+
+      if (response.ok) {
         showAlert('Sucesso', 'Excluído no sistema e Asaas.', 'success');
-        updateData({ payments: data.payments.filter(p => p.id !== id && p.installmentId !== id && p.asaasPaymentId !== id) });
-      } else showAlert('Aviso', 'Erro na exclusão.', 'warning');
-    } catch (e) { showAlert('Erro', 'Falha ao conectar.', 'error'); }
-    closeMod();
+        
+        let updatedPayments = [...data.payments];
+        if (idToDelete.startsWith('inst_') || deleteType === 'all') {
+          updatedPayments = updatedPayments.filter(p => p.installmentId !== idToDelete && p.id !== idToDelete);
+        } else {
+          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== idToDelete && p.id !== idToDelete);
+        }
+        updateData({ payments: updatedPayments });
+      } else {
+        const result = await response.json();
+        showAlert('Atenção', result.error || 'Erro na exclusão.', 'warning');
+      }
+    } catch (error) {
+      console.error('Erro ao excluir:', error);
+      showAlert('Erro', 'Falha na comunicação com o servidor.', 'error');
+    }
+
+    closeModal();
   };
 
-  const bge = (p: Payment) => {
-    const s = (p.status || '').toLowerCase();
-    if (s==='paid'||s==='pago'||s==='received') return <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase"><CheckCircle size={12}/> Pago</span>;
-    if (s==='overdue'||s==='atrasado') return <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase"><AlertCircle size={12}/> Atrasado</span>;
-    return <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase"><Clock size={12}/> Pendente</span>;
+  const openHistory = (studentId: string) => {
+    const student = data.students.find(s => s.id === studentId);
+    if (student) {
+      setSelectedStudentHistory(student);
+      setShowHistoryModal(true);
+    }
   };
 
-  const inpCls = "px-4 py-2 bg-white border border-slate-300 rounded-lg text-xs w-full";
+  const openDelete = (payment: Payment) => {
+    setPaymentToDelete(payment);
+    setShowDeleteModal(true);
+  };
 
-  return (
-    <div className="space-y-6 animate-in fade-in">
-      <div className="flex justify-between items-center">
-        <div><h2 className="text-3xl font-extrabold text-slate-900">Financeiro</h2><p className="text-slate-500 text-sm">Gestão de cobranças</p></div>
-        <div className="flex gap-2">
-          <button onClick={()=>setShowPrint(true)} className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl flex gap-2 font-bold"><Printer size={20} /> Imprimir Carnê</button>
-          <button onClick={()=>setIsModalOpen(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-xl flex gap-2 font-bold"><Plus size={20} /> Lançamento</button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden">
-        <div className="p-6 bg-slate-50 border-b flex flex-wrap gap-4">
-           <select className={inpCls+" w-auto"} value={filterType} onChange={e=>setFilterType(e.target.value as any)}><option value="all">Todas</option><option value="avulsas">Avulsas</option><option value="parcelamentos">Carnês</option></select>
-           <select className={inpCls+" w-auto"} value={filterStatus} onChange={e=>setFilterStatus(e.target.value as any)}><option value="all">Todos Status</option><option value="pending">Pendentes</option><option value="paid">Pagos</option><option value="overdue">Atrasados</option></select>
-           <select className={inpCls+" w-auto"} value={filterClass} onChange={e=>{setFilterClass(e.target.value); setFilterStudent('all');}}><option value="all">Turmas</option>{data.classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
-           <select className={inpCls+" w-auto"} value={filterStudent} onChange={e=>setFilterStudent(e.target.value)}><option value="all">Alunos</option>{data.students.filter(s=>filterClass==='all'||s.classId===filterClass).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left"><thead className="bg-slate-50 text-slate-500 text-[10px] uppercase font-black"><tr><th className="p-4">Descrição</th><th className="p-4">Vencimento</th><th className="p-4">Valor</th><th className="p-4">Status</th><th className="p-4 text-right">Ação</th></tr></thead>
-            <tbody>
-              {filterType === 'parcelamentos' ? groups.map(g => (
-                <React.Fragment key={g.id}>
-                  <tr className="bg-slate-50 border-b"><td className="p-4 font-bold">{data.students.find(s=>s.id===g.stId)?.name}<div className="text-[10px] text-indigo-500">CARNÊ {g.pts.length}X</div></td><td className="p-4 text-sm">{new Date(g.pts[g.pts.length-1].dueDate).toLocaleDateString('pt-BR')}</td><td className="p-4 font-black">R$ {g.tot.toFixed(2)}</td><td className="p-4"><Layers size={14} className="inline"/></td><td className="p-4 text-right flex justify-end gap-2"><button onClick={()=>setExpandedInst(p=>p.includes(g.id)?p.filter(x=>x!==g.id):[...p, g.id])} className="px-3 py-1 bg-white border rounded text-xs font-bold">Ver</button><button onClick={()=>handleLink(g.id,'carne')} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold"><Printer size={14}/></button><button onClick={()=>{setPayToDel({...g.pts[0], id:g.id, installmentId:g.id, asaasIdParaExcluir:g.id} as any); setShowDel(true);}} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td></tr>
-                  {expandedInst.includes(g.id) && g.pts.map(p => (
-                    <tr key={p.id} className="border-b bg-white"><td className="p-4 pl-10 text-[10px] uppercase text-slate-500">Parc. {p.installmentNumber}</td><td className="p-4 text-sm">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td><td className="p-4 font-bold">R$ {p.amount.toFixed(2)}</td><td className="p-4">{bge(p)}</td><td className="p-4 text-right flex justify-end gap-2">{p.asaasPaymentId && <button onClick={()=>handleLink(p.asaasPaymentId!,'boleto')} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold"><Barcode size={12}/> Boleto</button>}<button onClick={()=>{setPayToDel(p); setShowDel(true);}} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button></td></tr>
-                  ))}
-                </React.Fragment>
-              )) : filtP.map(p => (
-                <tr key={p.id} className="border-b hover:bg-slate-50"><td className="p-4 font-bold">{data.students.find(s=>s.id===p.studentId)?.name}<div className="text-[10px] text-slate-400">{p.description}</div></td><td className="p-4 text-sm">{new Date(p.dueDate).toLocaleDateString('pt-BR')}</td><td className="p-4 font-black">R$ {p.amount.toFixed(2)}</td><td className="p-4">{bge(p)}</td><td className="p-4 text-right flex justify-end gap-2">{p.asaasPaymentId && <button onClick={()=>handleLink(p.asaasPaymentId!,'boleto')} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold"><Barcode size={12}/> Boleto</button>}<button onClick={()=>{setPayToDel(p); setShowDel(true);}} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* FORMULÁRIO COMPLETO */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 overflow-y-auto"><div className="bg-white p-6 rounded-xl w-full max-w-lg mt-10"><h3 className="text-xl font-black mb-4">Novo Lançamento</h3><form onSubmit={handleCreate} className="space-y-4">
-          <SearchableSelect label="Aluno" options={data.students.map(s=>({id:s.id,name:s.name}))} value={formData.studentId} onChange={v=>setFormData({...formData,studentId:v})} required/>
-          <select className={inpCls} value={selItem} onChange={e=>{setSelItem(e.target.value); setFormData({...formData, description: e.target.options[e.target.selectedIndex].text});}}><option value="">Personalizado</option><optgroup label="Cursos">{data.courses.map(c=><option key={c.id} value={`course_${c.id}`}>{c.name}</option>)}</optgroup></select>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor Base (R$)</label><input className={inpCls} type="number" step="0.01" value={formData.amount} onChange={e=>setFormData({...formData,amount:Number(e.target.value)})} /></div>
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Qtd Parcelas</label><input className={inpCls} type="number" value={manualInst} onChange={e=>setManualInst(Number(e.target.value))} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Desconto (R$)</label><input className={inpCls} type="number" step="0.01" value={formData.discount} onChange={e=>setFormData({...formData,discount:Number(e.target.value)})} /></div>
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Vencimento (DD/MM/AAAA)</label><input className={inpCls} value={dueDisp} onChange={e=>{setDueDisp(fMask(e.target.value)); if(e.target.value.length===10) setFormData({...formData, dueDate: isoDt(e.target.value)})}} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Multa (%)</label><input className={inpCls} type="number" step="0.01" value={formData.fine} onChange={e=>setFormData({...formData,fine:Number(e.target.value)})} /></div>
-            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Juros ao Mês (%)</label><input className={inpCls} type="number" step="0.01" value={formData.interest} onChange={e=>setFormData({...formData,interest:Number(e.target.value)})} /></div>
-          </div>
-          <div><label className="text-[10px] font-bold text-slate-400 uppercase">Descrição Opcional</label><input className={inpCls} value={formData.description} onChange={e=>setFormData({...formData,description:e.target.value})} /></div>
-          <div className="flex gap-2"><button type="button" onClick={closeMod} className="flex-1 py-2 border rounded">Cancelar</button><button type="submit" className="flex-1 py-2 bg-indigo-600 text-white rounded">Salvar</button></div>
-        </form></div></div>
-      )}
-
-      {showDel && payToDel && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50"><div className="bg-white p-6 rounded-xl w-full max-w-sm text-center"><Trash2 size={30} className="mx-auto text-red-500 mb-4"/><h3 className="text-lg font-black mb-4">Excluir Pagamento</h3><div className="space-y-2"><button onClick={()=>del('single')} className="w-full py-2 bg-red-600 text-white rounded font-bold">Excluir Parcela</button>{(payToDel.installmentId || (payToDel as any).asaasIdParaExcluir) && <button onClick={()=>del('all')} className="w-full py-2 border border-red-200 text-red-600 rounded font-bold">Excluir Carnê Completo</button>}<button onClick={closeMod} className="w-full py-2 text-slate-500">Cancelar</button></div></div></div>
-      )}
-
-      {showFallback && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50"><div className="bg-white p-6 rounded-xl w-full max-w-2xl"><h3 className="text-xl font-black mb-4">Carnê Digital</h3><div className="grid grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">{fallbackInst.map(p=><div key={p.id} className="border p-4 rounded"><div className="text-xs text-indigo-500 font-bold">Parc. {p.numero}</div><div className="text-lg font-black">R$ {p.valor}</div><div className="text-sm">{new Date(p.vencimento).toLocaleDateString('pt-BR')}</div><div className="mt-2 pt-2 border-t flex justify-end">{p.asaasPaymentId ? <button onClick={()=>handleLink(p.asaasPaymentId,'boleto')} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded font-bold flex gap-1"><Barcode size={12}/> Boleto</button> : <span className="text-xs text-slate-400">Indisponível</span>}</div></div>)}</div><button onClick={()=>setShowFallback(false)} className="mt-4 w-full py-2 border rounded font-bold">Fechar</button></div></div>
-      )}
-
-      {showPrint && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50"><div className="bg-white p-6 rounded-xl w-full max-w-md"><h3 className="text-xl font-black mb-4">Imprimir Carnê</h3><SearchableSelect label="Selecione o Aluno" options={data.students.map(s=>({id:s.id,name:s.name}))} value={selCarne} onChange={setSelCarne} required/><div className="flex gap-2 mt-4"><button onClick={()=>setShowPrint(false)} className="flex-1 py-2 border rounded font-bold">Cancelar</button><button onClick={()=>{handlePrint(selCarne); setShowPrint(false); setSelCarne('');}} className="flex-1 py-2 bg-indigo-600 text-white rounded font-bold">Imprimir</button></div></div></div>
-      )}
-    </div>
-  );
-};
-
-export default Finance;
+  const getStatusBadge = (payment: Payment) => {
+    const status = (payment.status || '').toLowerCase();
+    
+    if (status === 'paid' || status === 'pago' || status === 'received' || status === 'confirmed') {
+      const dueDate = new Date(payment.dueDate);
+      const paidDate = payment.paidDate ? new Date(payment.paidDate) : null;
+      
+      if (paidDate) {
+        dueDate.setHours(0,0,0,0);
+        paidDate.setHours(0,0,0,0);
+        
+        if (paidDate <= dueDate) {
