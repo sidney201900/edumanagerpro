@@ -543,13 +543,13 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
     }
 
     if (!asaasIdToDelete) {
-      // Fallback para o ID local se não houver ID do Asaas (caso de erro de sincronia ou item manual)
-      asaasIdToDelete = paymentToDelete.id;
-      console.warn('Usando ID local como fallback para exclusão:', asaasIdToDelete);
+      console.error('Falha ao extrair ID. Objeto paymentToDelete:', paymentToDelete);
+      showAlert('Erro', 'ID da cobrança não encontrado.', 'error');
+      return;
     }
 
     try {
-      showAlert('Aguarde', 'Excluindo cobrança...', 'info');
+      showAlert('Aguarde', asaasIdToDelete.startsWith('inst_') ? 'Excluindo carnê completo no Asaas...' : 'Excluindo cobrança no Asaas...', 'info');
       const response = await fetch('/api/excluir_cobranca', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -564,23 +564,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
         // Update local state
         let updatedPayments = [...data.payments];
         if (asaasIdToDelete.startsWith('inst_')) {
-          updatedPayments = updatedPayments.filter(p => p.installmentId !== asaasIdToDelete && p.id !== asaasIdToDelete);
+          updatedPayments = updatedPayments.filter(p => p.installmentId !== asaasIdToDelete);
         } else {
-          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== asaasIdToDelete && p.id !== asaasIdToDelete);
+          updatedPayments = updatedPayments.filter(p => p.asaasPaymentId !== asaasIdToDelete);
         }
-
-        // Também remover das entregas de apostilas se houver vínculo
-        const updatedDeliveries = (data.handoutDeliveries || []).map(d => {
-          if (d.asaasPaymentId === asaasIdToDelete || (asaasIdToDelete.startsWith('inst_') && updatedPayments.every(p => p.asaasPaymentId !== d.asaasPaymentId))) {
-            return { ...d, asaasPaymentId: undefined, asaasPaymentUrl: undefined, paymentStatus: 'pending' as const };
-          }
-          return d;
-        });
-
-        updateData({ 
-          payments: updatedPayments,
-          handoutDeliveries: updatedDeliveries
-        });
+        updateData({ payments: updatedPayments });
       } else {
         showAlert('Erro', result.error || 'Não é possível excluir uma cobrança já paga.', 'error');
       }
@@ -804,7 +792,7 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                           >
                             <Printer size={14} /> Imprimir Carnê
                           </button>
-                          <button onClick={() => openDelete({ ...group.payments[0], id: group.installmentId, installmentId: group.installmentId, asaasIdParaExcluir: group.installmentId } as any)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir Carnê Completo"><Trash2 size={18} /></button>
+                          <button onClick={() => openDelete({ ...group.payments[0], id: group.installmentId, installmentId: group.installmentId, asaasIdParaExcluir: group.installmentId } as any)} className="p-2 text-slate-400 hover:text-red-600 transition-all" title="Excluir Carnê Completo (Asaas)"><Trash2 size={18} /></button>
                         </td>
                       </tr>
                       {isExpanded && group.payments.map(payment => (
@@ -1126,11 +1114,11 @@ const Finance: React.FC<FinanceProps> = ({ data, updateData }) => {
                 ) : (
                   <>
                     <button onClick={() => handleDelete('single')} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition-all">
-                      Excluir Apenas Esta
+                      Excluir Apenas Esta Parcela
                     </button>
-                    {(paymentToDelete.contractId || paymentToDelete.totalInstallments) && (
+                    {(paymentToDelete.installmentId || paymentToDelete.totalInstallments) && (
                       <button onClick={() => handleDelete('all')} className="w-full py-3 bg-white border-2 border-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">
-                        Excluir Todas Restantes
+                        Excluir Carnê Completo (Asaas)
                       </button>
                     )}
                   </>
