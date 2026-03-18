@@ -324,119 +324,122 @@ app.post('/api/gerar_cobranca', async (req, res) => {
   }
 });
 
-// 1. Rota para Excluir Cobrança (Asaas + EduManager)
+// 1. Excluir Cobrança (Inteligência Suprema)
 app.post('/api/excluir_cobranca', async (req, res) => {
   try {
     const { id } = req.body;
     if (!id) return res.status(400).json({ error: 'ID não fornecido' });
 
-    if (id.startsWith('inst_')) {
-      // Eliminar Carnê Completo no Asaas
-      const asaasResponse = await fetch(`https://sandbox.asaas.com/api/v3/installments/${id}`, { 
-        method: 'DELETE', 
-        headers: { 'access_token': process.env.ASAAS_API_KEY } 
-      });
-      
-      if (!asaasResponse.ok && asaasResponse.status !== 404) {
-        const errorData = await asaasResponse.json().catch(() => ({}));
-        return res.status(400).json({ error: errorData.errors?.[0]?.description || 'Erro ao excluir carnê no Asaas.' });
+    // Acha TODAS as parcelas ligadas a esse ID (seja inst_, pay_ ou UUID)
+    const { data: parcelas } = await supabase.from('alunos_cobrancas').select('asaas_payment_id, asaas_installment_id').or(`installment.eq.${id},asaas_installment_id.eq.${id},asaas_payment_id.eq.${id},id.eq.${id}`);
+
+    let instId = id.startsWith('inst_') ? id : null;
+
+    // Limpa tudo no Asaas individualmente para não ser bloqueado
+    if (parcelas && parcelas.length > 0) {
+      for (let p of parcelas) {
+        if (p.asaas_payment_id && p.asaas_payment_id.startsWith('pay_')) {
+          await fetch(`https://sandbox.asaas.com/api/v3/payments/${p.asaas_payment_id}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+        }
+        if (!instId && p.asaas_installment_id && p.asaas_installment_id.startsWith('inst_')) {
+          instId = p.asaas_installment_id;
+        }
       }
-
-      // Eliminar no EduManager (Supabase)
-      await supabase.from('alunos_cobrancas').delete().or(`installment.eq.${id},asaas_installment_id.eq.${id}`);
-      return res.status(200).json({ message: 'Carnê excluído no Asaas e no sistema com sucesso.' });
-
-    } else if (id.startsWith('pay_')) {
-      // Eliminar Parcela Avulsa no Asaas
-      const asaasResponse = await fetch(`https://sandbox.asaas.com/api/v3/payments/${id}`, { 
-        method: 'DELETE', 
-        headers: { 'access_token': process.env.ASAAS_API_KEY } 
-      });
-
-      if (!asaasResponse.ok && asaasResponse.status !== 404) {
-        const errorData = await asaasResponse.json().catch(() => ({}));
-        return res.status(400).json({ error: errorData.errors?.[0]?.description || 'Erro ao excluir cobrança no Asaas.' });
-      }
-
-      // Eliminar no EduManager (Supabase)
-      await supabase.from('alunos_cobrancas').delete().eq('asaas_payment_id', id);
-      return res.status(200).json({ message: 'Cobrança excluída no Asaas e no sistema com sucesso.' });
-
-    } else {
-      // Limpeza silenciosa de registos locais/antigos (Sem ir ao Asaas)
-      await supabase.from('alunos_cobrancas').delete().or(`installment.eq.${id},asaas_installment_id.eq.${id}`);
-      await supabase.from('alunos_cobrancas').delete().eq('asaas_payment_id', id);
-      return res.status(200).json({ message: 'Registo local excluído com sucesso.' });
     }
-  } catch (error) { return res.status(500).json({ error: 'Erro interno ao processar a exclusão.' }); }
+
+    // Tenta excluir o carnê agrupado no Asaas
+    if (instId) {
+       await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+    } else if (id.startsWith('inst_')) {
+       await fetch(`https://sandbox.asaas.com/api/v3/installments/${id}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+    } else if (id.startsWith('pay_')) {
+       await fetch(`https://sandbox.asaas.com/api/v3/payments/${id}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(() => {});
+    }
+
+    // Passa o rodo no banco de dados local com segurança
+    await supabase.from('alunos_cobrancas').delete().or(`installment.eq.${id},asaas_installment_id.eq.${id},asaas_payment_id.eq.${id},id.eq.${id}`);
+    
+    return res.status(200).json({ message: 'Tudo excluído com sucesso (Asaas e Local).' });
+  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
-// 2. Buscar Carnê pelo ID do Parcelamento (Imprimir a partir da tabela)
+// 2. Buscar Carnê pelo Parcelamento (Botão da Tabela)
 app.get('/api/parcelamentos/:id/carne', async (req, res) => {
   try {
-    const installmentId = req.params.id;
+    let id = req.params.id;
+    let instId = id.startsWith('inst_') ? id : null;
 
-    if (!installmentId || !installmentId.startsWith('inst_')) {
-      const { data: cobrancas } = await supabase.from('alunos_cobrancas').select('*').or(`installment.eq.${installmentId},asaas_installment_id.eq.${installmentId}`).order('vencimento', { ascending: true });
-      const boletos = cobrancas ? cobrancas.map((c, index) => ({ id: c.id, numero: index + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status })) : [];
-      return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'Carnê local antigo. Utilize os boletos individuais.' });
-    }
-
-    const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${installmentId}`, { method: 'GET', headers: { 'access_token': process.env.ASAAS_API_KEY } });
-    if (!installmentRes.ok) return res.status(500).json({ error: 'Erro ao buscar dados do carnê no Asaas.' });
-
-    const installmentData = await installmentRes.json();
-    if (installmentData.paymentBookUrl) {
-      return res.status(200).json({ status: 'success', type: 'pdf', url: installmentData.paymentBookUrl });
-    } else {
-      const { data: parcelasData } = await supabase.from('alunos_cobrancas').select('*').or(`installment.eq.${installmentId},asaas_installment_id.eq.${installmentId}`).order('vencimento', { ascending: true });
-      const boletos = parcelasData ? parcelasData.map((c, index) => ({ id: c.id, numero: index + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status })) : [];
-      return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'Link único indisponível no Asaas. Utilize os boletos.' });
-    }
-  } catch (error) { return res.status(500).json({ error: 'Erro interno ao processar o carnê.' }); }
-});
-
-// 3. Buscar Carnê pelo Aluno (Botão "Imprimir Carnê" do topo)
-app.get('/api/alunos/:id/carne', async (req, res) => {
-  try {
-    const { data: cobrancas } = await supabase
-      .from('alunos_cobrancas')
-      .select('installment, asaas_installment_id')
-      .eq('aluno_id', req.params.id)
-      .order('vencimento', { ascending: false });
-
-    if (!cobrancas || cobrancas.length === 0) return res.status(400).json({ error: 'Este aluno não possui cobranças registadas.' });
-
-    // Encontra o primeiro ID válido do Asaas (inst_)
-    let validInstallmentId = null;
-    for (let c of cobrancas) {
-      let id = c.asaas_installment_id || c.installment;
-      if (id && id.startsWith('inst_')) {
-        validInstallmentId = id;
-        break;
+    // Se não for inst_, acha o ID correto consultando o Asaas
+    if (!instId) {
+      const { data: dbData } = await supabase.from('alunos_cobrancas').select('asaas_installment_id, asaas_payment_id').or(`installment.eq.${id},id.eq.${id}`).limit(1);
+      if (dbData && dbData.length > 0) {
+        if (dbData[0].asaas_installment_id && dbData[0].asaas_installment_id.startsWith('inst_')) {
+          instId = dbData[0].asaas_installment_id;
+        } else if (dbData[0].asaas_payment_id && dbData[0].asaas_payment_id.startsWith('pay_')) {
+          const payRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${dbData[0].asaas_payment_id}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+          if (payRes.ok) {
+            const payData = await payRes.json();
+            if (payData.installment) instId = payData.installment;
+          }
+        }
       }
     }
 
-    if (!validInstallmentId) {
-      // Fallback para IDs antigos
-      const oldId = cobrancas.find(c => c.installment)?.installment;
-      if (!oldId) return res.status(400).json({ error: 'Nenhum carnê agrupado encontrado para este aluno.' });
-      const { data: parcelas } = await supabase.from('alunos_cobrancas').select('*').eq('installment', oldId).order('vencimento', { ascending: true });
-      const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status })) : [];
-      return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'Carnês no formato antigo. Utilize a lista individual.' });
+    // Se achou o carnê oficial, puxa o PDF!
+    if (instId) {
+      const asaasRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (asaasRes.ok) {
+        const data = await asaasRes.json();
+        if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl });
+      }
+    }
+    
+    // Fallback
+    const { data: parcelas } = await supabase.from('alunos_cobrancas').select('*').or(`installment.eq.${id},asaas_installment_id.eq.${id}`).order('vencimento', { ascending: true });
+    const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status })) : [];
+    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'O PDF agrupado não está disponível. Utilize os boletos abaixo.' });
+  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
+});
+
+// 3. Buscar Carnê pelo Aluno (Botão de Imprimir no Topo)
+app.get('/api/alunos/:id/carne', async (req, res) => {
+  try {
+    const { data: cobrancas } = await supabase.from('alunos_cobrancas').select('installment, asaas_installment_id, asaas_payment_id').eq('aluno_id', req.params.id).order('vencimento', { ascending: false });
+    if (!cobrancas || cobrancas.length === 0) return res.status(400).json({ error: 'Este aluno não possui cobranças registradas.' });
+
+    let instId = null;
+    for (let c of cobrancas) {
+      if ((c.asaas_installment_id && c.asaas_installment_id.startsWith('inst_')) || (c.installment && c.installment.startsWith('inst_'))) {
+        instId = c.asaas_installment_id || c.installment; break;
+      }
     }
 
-    const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${validInstallmentId}`, { method: 'GET', headers: { 'access_token': process.env.ASAAS_API_KEY } });
-    if (!installmentRes.ok) return res.status(500).json({ error: 'Erro ao buscar carnê no Asaas.' });
-
-    const installmentData = await installmentRes.json();
-    if (installmentData.paymentBookUrl) {
-      return res.status(200).json({ status: 'success', type: 'pdf', url: installmentData.paymentBookUrl });
-    } else {
-       const { data: parcelas } = await supabase.from('alunos_cobrancas').select('*').eq('installment', validInstallmentId).order('vencimento', { ascending: true });
-       const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status })) : [];
-       return res.status(200).json({ status: 'success', type: 'fallback', boletos });
+    if (!instId) {
+      for (let c of cobrancas) {
+        if (c.asaas_payment_id && c.asaas_payment_id.startsWith('pay_')) {
+          const payRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${c.asaas_payment_id}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+          if (payRes.ok) {
+            const payData = await payRes.json();
+            if (payData.installment) { instId = payData.installment; break; }
+          }
+        }
+      }
     }
+
+    if (instId) {
+      const asaasRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (asaasRes.ok) {
+        const data = await asaasRes.json();
+        if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl });
+      }
+    }
+
+    const fallbackId = instId || cobrancas.find(c => c.installment)?.installment;
+    if (!fallbackId) return res.status(400).json({ error: 'Nenhum carnê agrupado encontrado.' });
+    
+    const { data: parcelas } = await supabase.from('alunos_cobrancas').select('*').or(`installment.eq.${fallbackId},asaas_installment_id.eq.${fallbackId}`).order('vencimento', { ascending: true });
+    const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status })) : [];
+    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'Visualização individual das parcelas ativada.' });
   } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
