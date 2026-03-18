@@ -52,3 +52,31 @@ export const uploadProfilePicture = async (userId: string, file: File): Promise<
     return null;
   }
 };
+
+export const uploadLogo = async (file: File): Promise<string | null> => {
+  if (!isSupabaseConfigured()) return null;
+
+  try {
+    const fileExt = file.name.split('.').pop() || 'webp';
+    const fileName = `logo-${Date.now()}.${fileExt}`;
+    const filePath = `logos/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('edumanager-assets')
+      .upload(filePath, file, {
+        upsert: true,
+        contentType: file.type
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from('edumanager-assets')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  } catch (error) {
+    console.error('Error uploading logo:', error);
+    return null;
+  }
+};

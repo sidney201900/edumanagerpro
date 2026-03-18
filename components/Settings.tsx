@@ -2,10 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { SchoolData, SchoolProfile } from '../types';
 import { dbService } from '../services/dbService';
 import { Download, Upload, Trash2, Database, School, Camera, FileText, Info, AlertTriangle, X, CheckCircle, AlertCircle, Cloud, HelpCircle, RefreshCw, Plus } from 'lucide-react';
-import { isSupabaseConfigured } from '../services/supabase';
+import { isSupabaseConfigured, uploadLogo } from '../services/supabase';
 import { useDialog } from '../DialogContext';
-
-import { compressImage } from '../services/imageService';
+import imageCompression from 'browser-image-compression';
 
 interface SettingsProps {
   data: SchoolData;
@@ -17,6 +16,7 @@ const Settings: React.FC<SettingsProps> = ({ data, updateData, setData }) => {
   const { showAlert, showConfirm } = useDialog();
   const [selectedProfileId, setSelectedProfileId] = useState<string>(data.profile.id || 'main-school');
   const [profiles, setProfiles] = useState<SchoolProfile[]>(data.profiles || [data.profile]);
+  const [globalLogo, setGlobalLogo] = useState<string>(data.logo || '');
   
   const currentProfile = profiles.find(p => p.id === selectedProfileId) || profiles[0];
 
@@ -25,6 +25,10 @@ const Settings: React.FC<SettingsProps> = ({ data, updateData, setData }) => {
   React.useEffect(() => {
     setProfileForm(currentProfile);
   }, [selectedProfileId, profiles]);
+
+  React.useEffect(() => {
+    setGlobalLogo(data.logo || '');
+  }, [data.logo]);
 
   const validateCNPJ = (cnpj: string) => {
     cnpj = cnpj.replace(/[^\d]+/g, '');
@@ -200,43 +204,42 @@ using (true);`;
     const file = e.target.files?.[0];
     if (file) {
       try {
-        showAlert('Aguarde', 'Otimizando e salvando a logo...', 'info');
+        showAlert('Aguarde', 'Fazendo upload e otimizando a logo...', 'info');
         
-        // 1. Compress image on client side (always good for performance and fallback)
-        const compressedBase64 = await compressImage(file, 500, 0.7);
+        // Compression options
+        const options = {
+          maxSizeMB: 0.1, // 100KB
+          maxWidthOrHeight: 500,
+          useWebWorker: true
+        };
+
+        const compressedFile = await imageCompression(file, options);
         
-        // 2. Try server-side upload
-        try {
-          const formData = new FormData();
-          formData.append('logo', file);
-
-          const response = await fetch('/api/upload/logo', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            if (data.url) {
-              setProfileForm(prev => ({ ...prev, logo: data.url }));
-              showAlert('Sucesso', 'Logo atualizada e salva na nuvem!', 'success');
-              return;
-            }
+        let logoUrl = '';
+        
+        // Try to upload to Supabase if configured
+        if (supabaseConfigured) {
+          const url = await uploadLogo(compressedFile);
+          if (url) {
+            logoUrl = url;
           }
-          
-          const errorData = await response.json().catch(() => ({}));
-          console.warn('Server-side upload returned error:', errorData);
-        } catch (uploadError) {
-          console.warn('Server-side upload failed, falling back to base64:', uploadError);
+        }
+        
+        // Fallback to base64 if Supabase upload failed or not configured
+        if (!logoUrl) {
+          const reader = new FileReader();
+          logoUrl = await new Promise((resolve) => {
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsDataURL(compressedFile);
+          });
         }
 
-        // 3. Fallback to Base64 if server upload fails or returns invalid data
-        setProfileForm(prev => ({ ...prev, logo: compressedBase64 }));
-        showAlert('Aviso', 'Logo salva localmente (upload na nuvem indisponível).', 'info');
-        
+        setGlobalLogo(logoUrl);
+        updateData({ logo: logoUrl });
+        showAlert('Sucesso', 'Logo atualizada com sucesso!', 'success');
       } catch (error) {
-        console.error('Erro ao processar imagem:', error);
-        showAlert('Erro', 'Falha ao processar a imagem selecionada.', 'error');
+        console.error('Erro ao fazer upload da imagem:', error);
+        showAlert('Erro', 'Falha ao processar e salvar a imagem.', 'error');
       }
     }
   };
@@ -332,12 +335,12 @@ using (true);`;
             <div className="flex flex-col md:flex-row gap-8">
               <div className="flex flex-col items-center gap-4">
                 <div className="w-40 h-40 rounded-xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group shadow-inner">
-                  {profileForm.logo ? (
-                    <img src={profileForm.logo} alt="Logo" className="w-full h-full object-contain p-2" />
+                  {globalLogo ? (
+                    <img src={globalLogo} alt="Logo" className="w-full h-full object-contain p-2" />
                   ) : (
                     <div className="text-slate-300 text-center p-4">
                       <Camera size={40} className="mx-auto mb-2 opacity-20" />
-                      <span className="text-[10px] font-bold uppercase text-slate-500">Logo da Escola</span>
+                      <span className="text-[10px] font-bold uppercase text-slate-500">Logo Global</span>
                     </div>
                   )}
                   <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white">
@@ -345,6 +348,7 @@ using (true);`;
                     <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
                   </label>
                 </div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase text-center">Logo única para todas as unidades</p>
               </div>
 
               <div className="flex-1 space-y-4">
