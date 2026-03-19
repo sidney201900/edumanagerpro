@@ -30,6 +30,18 @@ const Settings: React.FC<SettingsProps> = ({ data, updateData, setData }) => {
     setGlobalLogo(data.logo || '');
   }, [data.logo]);
 
+  const [activeTab, setActiveTab] = useState<'perfil' | 'monitoramento'>('perfil');
+  const [apiLogs, setApiLogs] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    if (activeTab === 'monitoramento') {
+      fetch('/api/logs')
+        .then(res => res.json())
+        .then(data => setApiLogs(data))
+        .catch(err => console.error('Erro ao buscar logs:', err));
+    }
+  }, [activeTab]);
+
   const validateCNPJ = (cnpj: string) => {
     cnpj = cnpj.replace(/[^\d]+/g, '');
     if (cnpj === '' || cnpj.length !== 14) return false;
@@ -286,228 +298,276 @@ using (true);`;
       <header>
         <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Configurações</h2>
         <p className="text-slate-500 font-medium">Gerencie o perfil da escola, modelo de contrato e dados.</p>
+        
+        <div className="flex gap-4 mt-6 border-b border-slate-200">
+          <button 
+            onClick={() => setActiveTab('perfil')}
+            className={`pb-2 font-bold text-sm ${activeTab === 'perfil' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Perfil
+          </button>
+          <button 
+            onClick={() => setActiveTab('monitoramento')}
+            className={`pb-2 font-bold text-sm ${activeTab === 'monitoramento' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Monitoramento de API
+          </button>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-xl space-y-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3 text-indigo-600">
-                <div className="p-3 bg-indigo-50 rounded-lg">
-                  <School size={24} />
+      {activeTab === 'perfil' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-xl space-y-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3 text-indigo-600">
+                  <div className="p-3 bg-indigo-50 rounded-lg">
+                    <School size={24} />
+                  </div>
+                  <h3 className="text-xl font-black text-slate-800">Perfil da Instituição</h3>
                 </div>
-                <h3 className="text-xl font-black text-slate-800">Perfil da Instituição</h3>
+                <button 
+                  onClick={addNewInstitution}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-bold text-xs shadow-md"
+                >
+                  <Plus size={16} /> Nova Instituição
+                </button>
               </div>
-              <button 
-                onClick={addNewInstitution}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-bold text-xs shadow-md"
-              >
-                <Plus size={16} /> Nova Instituição
-              </button>
-            </div>
 
-            {/* Institution Selector */}
-            <div className="flex flex-wrap gap-2 mb-6">
-              {profiles.map(p => (
-                <div key={p.id} className="flex items-center">
-                  <button
-                    onClick={() => setSelectedProfileId(p.id)}
-                    className={`px-4 py-2 rounded-lg font-bold text-xs transition-all border ${
-                      selectedProfileId === p.id 
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' 
-                        : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
-                    }`}
-                  >
-                    {p.name} {p.type === 'matriz' && '(Matriz)'}
-                  </button>
-                  {p.id !== selectedProfileId && p.type !== 'matriz' && (
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); deleteInstitution(p.id); }}
-                      className="ml-1 p-1 text-red-400 hover:text-red-600 transition-colors"
+              {/* Institution Selector */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                {profiles.map(p => (
+                  <div key={p.id} className="flex items-center">
+                    <button
+                      onClick={() => setSelectedProfileId(p.id)}
+                      className={`px-4 py-2 rounded-lg font-bold text-xs transition-all border ${
+                        selectedProfileId === p.id 
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' 
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                      }`}
                     >
-                      <Trash2 size={14} />
+                      {p.name} {p.type === 'matriz' && '(Matriz)'}
                     </button>
-                  )}
-                </div>
-              ))}
-            </div>
+                    {p.id !== selectedProfileId && p.type !== 'matriz' && (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); deleteInstitution(p.id); }}
+                        className="ml-1 p-1 text-red-400 hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
 
-            <div className="flex flex-col md:flex-row gap-8">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-40 h-40 rounded-xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group shadow-inner">
-                  {globalLogo ? (
-                    <img src={globalLogo} alt="Logo" className="w-full h-full object-contain p-2" />
-                  ) : (
-                    <div className="text-slate-300 text-center p-4">
-                      <Camera size={40} className="mx-auto mb-2 opacity-20" />
-                      <span className="text-[10px] font-bold uppercase text-slate-500">Logo Global</span>
+              <div className="flex flex-col md:flex-row gap-8">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="w-40 h-40 rounded-xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group shadow-inner">
+                    {globalLogo ? (
+                      <img src={globalLogo} alt="Logo" className="w-full h-full object-contain p-2" />
+                    ) : (
+                      <div className="text-slate-300 text-center p-4">
+                        <Camera size={40} className="mx-auto mb-2 opacity-20" />
+                        <span className="text-[10px] font-bold uppercase text-slate-500">Logo Global</span>
+                      </div>
+                    )}
+                    <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white">
+                      <Upload size={24} />
+                      <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+                    </label>
+                  </div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase text-center">Logo única para todas as unidades</p>
+                </div>
+
+                <div className="flex-1 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Nome da Escola</label>
+                      <input className={inputClass} value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
                     </div>
-                  )}
-                  <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white">
-                    <Upload size={24} />
-                    <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-                  </label>
-                </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase text-center">Logo única para todas as unidades</p>
-              </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">CNPJ</label>
+                      <input className={inputClass} placeholder="00.000.000/0001-00" value={profileForm.cnpj} onChange={e => setProfileForm({...profileForm, cnpj: e.target.value})} />
+                    </div>
+                  </div>
 
-              <div className="flex-1 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Nome da Escola</label>
-                    <input className={inputClass} value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">CEP</label>
+                      <input className={inputClass} placeholder="00000-000" value={profileForm.zip} onChange={e => handleZipChange(e.target.value)} />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Endereço</label>
+                      <input className={inputClass} value={profileForm.address} onChange={e => setProfileForm({...profileForm, address: e.target.value})} />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">CNPJ</label>
-                    <input className={inputClass} placeholder="00.000.000/0001-00" value={profileForm.cnpj} onChange={e => setProfileForm({...profileForm, cnpj: e.target.value})} />
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-1">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">CEP</label>
-                    <input className={inputClass} placeholder="00000-000" value={profileForm.zip} onChange={e => handleZipChange(e.target.value)} />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Cidade</label>
+                      <input className={inputClass} value={profileForm.city} onChange={e => setProfileForm({...profileForm, city: e.target.value})} />
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Estado (UF)</label>
+                      <input className={inputClass} placeholder="UF" value={profileForm.state} onChange={e => setProfileForm({...profileForm, state: e.target.value.toUpperCase().slice(0, 2)})} />
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Tipo</label>
+                      <select 
+                        className={inputClass} 
+                        value={profileForm.type} 
+                        onChange={e => setProfileForm({...profileForm, type: e.target.value as 'matriz' | 'filial'})}
+                      >
+                        <option value="matriz">Matriz</option>
+                        <option value="filial">Filial</option>
+                      </select>
+                    </div>
                   </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Endereço</label>
-                    <input className={inputClass} value={profileForm.address} onChange={e => setProfileForm({...profileForm, address: e.target.value})} />
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-1">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Cidade</label>
-                    <input className={inputClass} value={profileForm.city} onChange={e => setProfileForm({...profileForm, city: e.target.value})} />
-                  </div>
-                  <div className="md:col-span-1">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Estado (UF)</label>
-                    <input className={inputClass} placeholder="UF" value={profileForm.state} onChange={e => setProfileForm({...profileForm, state: e.target.value.toUpperCase().slice(0, 2)})} />
-                  </div>
-                  <div className="md:col-span-1">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Tipo</label>
-                    <select 
-                      className={inputClass} 
-                      value={profileForm.type} 
-                      onChange={e => setProfileForm({...profileForm, type: e.target.value as 'matriz' | 'filial'})}
-                    >
-                      <option value="matriz">Matriz</option>
-                      <option value="filial">Filial</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Telefone</label>
-                    <input className={inputClass} placeholder="(00) 0 0000-0000" value={profileForm.phone} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} maxLength={16} />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Email</label>
-                    <input className={inputClass} placeholder="Email" value={profileForm.email} onChange={e => setProfileForm({...profileForm, email: e.target.value})} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Telefone</label>
+                      <input className={inputClass} placeholder="(00) 0 0000-0000" value={profileForm.phone} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} maxLength={16} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Email</label>
+                      <input className={inputClass} placeholder="Email" value={profileForm.email} onChange={e => setProfileForm({...profileForm, email: e.target.value})} />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="pt-4">
-              <button 
-                onClick={saveProfile}
-                className="w-full py-4 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text-sm"
-              >
-                Salvar Perfil da Instituição
-              </button>
+              <div className="pt-4">
+                <button 
+                  onClick={saveProfile}
+                  className="w-full py-4 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg font-bold text-sm"
+                >
+                  Salvar Perfil da Instituição
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl space-y-4">
-            <div className="flex items-center gap-3 text-indigo-600">
-              <div className="p-2 bg-indigo-50 rounded-lg">
-                <Cloud size={20} />
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl space-y-4">
+              <div className="flex items-center gap-3 text-indigo-600">
+                <div className="p-2 bg-indigo-50 rounded-lg">
+                  <Cloud size={20} />
+                </div>
+                <h3 className="text-lg font-black text-slate-800">Sincronização Nuvem</h3>
               </div>
-              <h3 className="text-lg font-black text-slate-800">Sincronização Nuvem</h3>
-            </div>
-            
-            <div className={`p-4 rounded-lg border ${supabaseConfigured ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-              <div className="flex items-center gap-2 font-bold text-sm mb-1">
-                {supabaseConfigured ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                {supabaseConfigured ? 'Conectado ao Supabase' : 'Não Conectado'}
+              
+              <div className={`p-4 rounded-lg border ${supabaseConfigured ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                <div className="flex items-center gap-2 font-bold text-sm mb-1">
+                  {supabaseConfigured ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+                  {supabaseConfigured ? 'Conectado ao Supabase' : 'Não Conectado'}
+                </div>
+                <p className="text-xs opacity-80 leading-relaxed">
+                  {supabaseConfigured 
+                    ? 'Seus dados estão sendo salvos automaticamente na nuvem.' 
+                    : 'Para habilitar o backup na nuvem, configure as variáveis de ambiente VITE_SUPABASE_URL e VITE_SUPABASE_KEY.'}
+                </p>
+                {!supabaseConfigured && (
+                  <div className="mt-3 text-[10px] bg-white p-2 rounded border border-slate-200 font-mono text-slate-400 break-all">
+                    VITE_SUPABASE_URL=...<br/>
+                    VITE_SUPABASE_KEY=...
+                  </div>
+                )}
               </div>
-              <p className="text-xs opacity-80 leading-relaxed">
-                {supabaseConfigured 
-                  ? 'Seus dados estão sendo salvos automaticamente na nuvem.' 
-                  : 'Para habilitar o backup na nuvem, configure as variáveis de ambiente VITE_SUPABASE_URL e VITE_SUPABASE_KEY.'}
-              </p>
-              {!supabaseConfigured && (
-                <div className="mt-3 text-[10px] bg-white p-2 rounded border border-slate-200 font-mono text-slate-400 break-all">
-                  VITE_SUPABASE_URL=...<br/>
-                  VITE_SUPABASE_KEY=...
+
+              {supabaseConfigured && (
+                <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700">
+                  <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                    <CheckCircle size={14} /> Sincronização Automática Ativa
+                  </p>
                 </div>
               )}
+
+              <button 
+                onClick={downloadSupabaseSQL}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-all font-bold text-xs border border-indigo-100"
+              >
+                <FileText size={16} /> Baixar Script SQL Supabase
+              </button>
             </div>
 
-            {supabaseConfigured && (
-              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700">
-                <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                  <CheckCircle size={14} /> Sincronização Automática Ativa
-                </p>
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl space-y-4">
+              <div className="flex items-center gap-3 text-indigo-600">
+                <div className="p-2 bg-indigo-50 rounded-lg">
+                  <Database size={20} />
+                </div>
+                <h3 className="text-lg font-black text-slate-800">Dados do System</h3>
               </div>
-            )}
-
-            <button 
-              onClick={downloadSupabaseSQL}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-all font-bold text-xs border border-indigo-100"
-            >
-              <FileText size={16} /> Baixar Script SQL Supabase
-            </button>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl space-y-4">
-            <div className="flex items-center gap-3 text-indigo-600">
-              <div className="p-2 bg-indigo-50 rounded-lg">
-                <Database size={20} />
-              </div>
-              <h3 className="text-lg font-black text-slate-800">Dados do System</h3>
+              <button onClick={async () => await dbService.exportData()} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-all font-bold text-xs">
+                <Download size={16} /> Exportar Backup
+              </button>
+              <label className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-200 text-slate-600 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors font-bold text-xs">
+                <Upload size={16} /> Importar Backup
+                <input type="file" className="hidden" accept=".json" onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    showConfirm(
+                      'Substituir Dados?', 
+                      '⚠️ Tem certeza que deseja substituir todos os dados atuais? Esta ação não pode ser desfeita.',
+                      async () => {
+                        await dbService.importData(file);
+                        const newData = await dbService.initData();
+                        setData(newData);
+                        showAlert('Sucesso', '✅ Dados restaurados com sucesso!', 'success');
+                      }
+                    );
+                  }
+                }} />
+              </label>
             </div>
-            <button onClick={async () => await dbService.exportData()} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-all font-bold text-xs">
-              <Download size={16} /> Exportar Backup
-            </button>
-            <label className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-200 text-slate-600 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors font-bold text-xs">
-              <Upload size={16} /> Importar Backup
-              <input type="file" className="hidden" accept=".json" onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  showConfirm(
-                    'Substituir Dados?', 
-                    '⚠️ Tem certeza que deseja substituir todos os dados atuais? Esta ação não pode ser desfeita.',
-                    async () => {
-                      await dbService.importData(file);
-                      const newData = await dbService.initData();
-                      setData(newData);
-                      showAlert('Sucesso', '✅ Dados restaurados com sucesso!', 'success');
-                    }
-                  );
-                }
-              }} />
-            </label>
-          </div>
 
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl">
-            <button 
-              onClick={() => showConfirm(
-                'Resetar Sistema', 
-                'Isso apagará TODOS os dados cadastrados. Não há como desfazer.',
-                handleReset,
-                'alert'
-              )} 
-              className="w-full py-3 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors font-bold text-xs flex items-center justify-center gap-2"
-            >
-              <Trash2 size={16} /> Resetar Fábrica
-            </button>
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xl">
+              <button 
+                onClick={() => showConfirm(
+                  'Resetar Sistema', 
+                  'Isso apagará TODOS os dados cadastrados. Não há como desfazer.',
+                  handleReset,
+                  'alert'
+                )} 
+                className="w-full py-3 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors font-bold text-xs flex items-center justify-center gap-2"
+              >
+                <Trash2 size={16} /> Resetar Fábrica
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-xl">
+          <h3 className="text-xl font-black text-slate-800 mb-6">Logs de API</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-black tracking-wider">
+                <tr>
+                  <th className="px-4 py-3">Data</th>
+                  <th className="px-4 py-3">Serviço</th>
+                  <th className="px-4 py-3">Ação</th>
+                  <th className="px-4 py-3">Detalhes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {apiLogs.map((log, i) => (
+                  <tr key={i}>
+                    <td className="px-4 py-3 text-slate-500">{new Date(log.date).toLocaleString()}</td>
+                    <td className="px-4 py-3 font-bold text-indigo-600">{log.service}</td>
+                    <td className="px-4 py-3 text-slate-700">{log.action}</td>
+                    <td className="px-4 py-3 text-slate-600 text-xs font-mono">{JSON.stringify(log.details)}</td>
+                  </tr>
+                ))}
+                {apiLogs.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-slate-400">Nenhum log encontrado.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

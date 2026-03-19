@@ -311,6 +311,14 @@ app.post('/api/gerar_cobranca', async (req, res) => {
   }
 });
 
+const apiLogs = [];
+function addLog(service, action, details) { 
+  apiLogs.unshift({ date: new Date().toISOString(), service, action, details }); 
+  if(apiLogs.length > 100) apiLogs.pop(); 
+}
+
+app.get('/api/logs', (req, res) => res.json(apiLogs));
+
 const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
 // EXCLUSÃO EM MASSA (Asaas + EduManager)
@@ -324,7 +332,10 @@ app.post('/api/excluir_cobranca', async (req, res) => {
     
     // Busca tudo relacionado a esse ID
     const { data: parcelas, error: fetchErr } = await supabase.from('alunos_cobrancas').select('*').or(query);
-    if (fetchErr) return res.status(500).json({ error: 'Erro ao buscar dados.' });
+    if (fetchErr) {
+      addLog('Supabase', 'Busca Exclusão', fetchErr.message);
+      return res.status(500).json({ error: 'Erro ao buscar dados.' });
+    }
 
     let payIds = new Set();
     let instIds = new Set();
@@ -340,22 +351,37 @@ app.post('/api/excluir_cobranca', async (req, res) => {
 
     // Apaga no Asaas
     for (let payId of payIds) {
-      await fetch(`https://sandbox.asaas.com/api/v3/payments/${payId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(()=>null);
+      const resp = await fetch(`https://sandbox.asaas.com/api/v3/payments/${payId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        addLog('Asaas', 'Exclusão Pagamento', err);
+        return res.status(400).json({ error: err.errors?.[0]?.description || 'Erro no Asaas' });
+      }
     }
     for (let instId of instIds) {
-      await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(()=>null);
+      const resp = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        addLog('Asaas', 'Exclusão Parcelamento', err);
+        return res.status(400).json({ error: err.errors?.[0]?.description || 'Erro no Asaas' });
+      }
     }
 
     // Apaga no banco
     if (parcelas && parcelas.length > 0) {
       const idsToDelete = parcelas.map(p => p.id);
-      await supabase.from('alunos_cobrancas').delete().in('id', idsToDelete);
+      const { error: delErr } = await supabase.from('alunos_cobrancas').delete().in('id', idsToDelete);
+      if (delErr) {
+        addLog('Supabase', 'Exclusão', delErr.message);
+        return res.status(500).json({ error: 'Erro ao excluir no banco.' });
+      }
     }
-    await supabase.from('alunos_cobrancas').delete().eq('asaas_payment_id', id);
-    if (isUUID(id)) await supabase.from('alunos_cobrancas').delete().eq('id', id);
-
+    
     return res.status(200).json({ message: 'Excluído com sucesso (Asaas e EduManager)' });
-  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
+  } catch (error) { 
+    addLog('Server', 'Exclusão', error.message);
+    return res.status(500).json({ error: 'Erro interno.' }); 
+  }
 });
 
 // IMPRIMIR CARNÊ (Prevenção contra crash)
