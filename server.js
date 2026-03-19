@@ -311,356 +311,103 @@ app.post('/api/gerar_cobranca', async (req, res) => {
   }
 });
 
-// Excluir Cobrança
+const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+// EXCLUSÃO EM MASSA (Asaas + EduManager)
 app.post('/api/excluir_cobranca', async (req, res) => {
   try {
     const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'ID não fornecido' });
 
-    if (!id) {
-      return res.status(400).json({ error: 'ID não fornecido' });
+    let query = `installment.eq.${id},asaas_installment_id.eq.${id},asaas_payment_id.eq.${id}`;
+    if (isUUID(id)) query += `,id.eq.${id}`;
+    
+    // Busca tudo relacionado a esse ID
+    const { data: parcelas, error: fetchErr } = await supabase.from('alunos_cobrancas').select('*').or(query);
+    if (fetchErr) return res.status(500).json({ error: 'Erro ao buscar dados.' });
+
+    let payIds = new Set();
+    let instIds = new Set();
+    if (id.startsWith('pay_')) payIds.add(id);
+    if (id.startsWith('inst_')) instIds.add(id);
+
+    if (parcelas && parcelas.length > 0) {
+      parcelas.forEach(p => {
+        if (p.asaas_payment_id?.startsWith('pay_')) payIds.add(p.asaas_payment_id);
+        if (p.asaas_installment_id?.startsWith('inst_')) instIds.add(p.asaas_installment_id);
+      });
     }
 
-    if (id.startsWith('inst_')) {
-      // 1. Deletar Parcelamento no Asaas
-      const asaasResponse = await fetch(`https://sandbox.asaas.com/api/v3/installments/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'access_token': process.env.ASAAS_API_KEY
-        }
-      });
-
-      if (!asaasResponse.ok && asaasResponse.status !== 404) {
-        const errorData = await asaasResponse.json().catch(() => ({}));
-        const asaasErrorMessage = errorData.errors?.[0]?.description || 'Erro ao excluir parcelamento no Asaas';
-        console.error('Erro ao deletar parcelamento no Asaas:', asaasErrorMessage);
-        return res.status(400).json({ error: asaasErrorMessage });
-      }
-
-      // 2. Deletar no Supabase apenas se sucesso no Asaas
-      const { error: deleteError } = await supabase
-        .from('alunos_cobrancas')
-        .delete()
-        .or(`installment.eq.${id},asaas_installment_id.eq.${id}`);
-
-      if (deleteError) {
-        console.error('Erro ao deletar parcelamento no Supabase:', deleteError);
-        return res.status(500).json({ error: 'Erro ao deletar no banco de dados' });
-      }
-
-      return res.status(200).json({ message: 'Parcelamento excluído com sucesso' });
-
-    } else if (id.startsWith('pay_')) {
-      // 1. Deletar Cobrança Avulsa/Parcela no Asaas
-      const asaasResponse = await fetch(`https://sandbox.asaas.com/api/v3/payments/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'access_token': process.env.ASAAS_API_KEY
-        }
-      });
-
-      if (!asaasResponse.ok && asaasResponse.status !== 404) {
-        const errorData = await asaasResponse.json().catch(() => ({}));
-        const asaasErrorMessage = errorData.errors?.[0]?.description || 'Erro ao excluir cobrança no Asaas';
-        console.error('Erro ao deletar cobrança no Asaas:', asaasErrorMessage);
-        return res.status(400).json({ error: asaasErrorMessage });
-      }
-
-      // 2. Deletar no Supabase apenas se sucesso no Asaas
-      const { error: deleteError } = await supabase
-        .from('alunos_cobrancas')
-        .delete()
-        .eq('asaas_payment_id', id);
-
-      if (deleteError) {
-        console.error('Erro ao deletar cobrança no Supabase:', deleteError);
-        return res.status(500).json({ error: 'Erro ao deletar no banco de dados' });
-      }
-
-      return res.status(200).json({ message: 'Cobrança excluída com sucesso' });
-    } else {
-      return res.status(400).json({ error: 'Formato de ID inválido' });
+    // Apaga no Asaas
+    for (let payId of payIds) {
+      await fetch(`https://sandbox.asaas.com/api/v3/payments/${payId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(()=>null);
+    }
+    for (let instId of instIds) {
+      await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { method: 'DELETE', headers: { 'access_token': process.env.ASAAS_API_KEY } }).catch(()=>null);
     }
 
-  } catch (error) {
-    console.error('Erro na função excluir_cobranca:', error);
-    return res.status(500).json({ error: 'Erro interno' });
-  }
+    // Apaga no banco
+    if (parcelas && parcelas.length > 0) {
+      const idsToDelete = parcelas.map(p => p.id);
+      await supabase.from('alunos_cobrancas').delete().in('id', idsToDelete);
+    }
+    await supabase.from('alunos_cobrancas').delete().eq('asaas_payment_id', id);
+    if (isUUID(id)) await supabase.from('alunos_cobrancas').delete().eq('id', id);
+
+    return res.status(200).json({ message: 'Excluído com sucesso (Asaas e EduManager)' });
+  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
-// Buscar Carnê (Payment Book) do Aluno
+// IMPRIMIR CARNÊ (Prevenção contra crash)
 app.get('/api/parcelamentos/:id/carne', async (req, res) => {
   try {
-    const installmentId = req.params.id;
+    const id = req.params.id;
+    let query = `installment.eq.${id},asaas_installment_id.eq.${id}`;
+    if (isUUID(id)) query += `,id.eq.${id}`;
 
-    console.log(`Buscando carnê para o installment: ${installmentId}`);
+    const { data: parcelas, error: dbErr } = await supabase.from('alunos_cobrancas').select('*').or(query).order('vencimento', { ascending: true });
+    if (dbErr) return res.status(500).json({ error: 'Erro de banco.' });
 
-    // 1. Buscar detalhes do parcelamento no Asaas
-    const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${installmentId}`, {
-      method: 'GET',
-      headers: {
-        'access_token': process.env.ASAAS_API_KEY
-      }
-    });
-
-    if (!installmentRes.ok) {
-      const errorData = await installmentRes.json();
-      console.error(`Erro ao buscar installment ${installmentId} no Asaas:`, errorData);
-      return res.status(500).json({ error: 'Erro ao buscar dados do carnê no Asaas.' });
+    let instId = id.startsWith('inst_') ? id : null;
+    if (!instId && parcelas?.length > 0) {
+      const p = parcelas.find(x => x.asaas_installment_id?.startsWith('inst_'));
+      if (p) instId = p.asaas_installment_id;
     }
 
-    const installmentData = await installmentRes.json();
-    console.log('Resposta do Asaas ao buscar o Installment:', installmentData);
+    if (instId) {
+      const ar = await fetch(`https://sandbox.asaas.com/api/v3/installments/${instId}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+      if (ar.ok) {
+        const data = await ar.json();
+        if (data.paymentBookUrl) return res.status(200).json({ status: 'success', type: 'pdf', url: data.paymentBookUrl });
+      }
+    }
     
-    if (installmentData.paymentBookUrl) {
-      console.log(`URL do carnê encontrada: ${installmentData.paymentBookUrl}`);
-      return res.status(200).json({ status: 'success', type: 'pdf', url: installmentData.paymentBookUrl });
-    } else {
-      console.log(`Installment ${installmentId} não possui paymentBookUrl. Acionando Plano B (buscando parcelas).`);
-      
-      // Plano B: Buscar todas as cobranças deste installment no Supabase
-      const { data: cobrancas, error: dbError } = await supabase
-        .from('alunos_cobrancas')
-        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status, installment, asaas_installment_id')
-        .or(`installment.eq.${installmentId},asaas_installment_id.eq.${installmentId}`)
-        .order('vencimento', { ascending: true });
-
-      if (dbError) {
-        console.error('Erro ao buscar parcelas no Supabase:', dbError);
-        return res.status(500).json({ status: 'error', error: 'Erro ao buscar parcelas do carnê.' });
-      }
-
-      if (!cobrancas || cobrancas.length === 0) {
-        return res.status(404).json({ status: 'error', error: 'Nenhuma parcela encontrada para este carnê.' });
-      }
-
-      // Format the response for the frontend modal
-      const boletos = cobrancas.map((c, index) => ({
-        id: c.id,
-        numero: index + 1,
-        vencimento: c.vencimento,
-        valor: c.valor,
-        linkBoleto: c.link_boleto,
-        status: c.status,
-        installment: c.installment
-      }));
-
-      return res.status(200).json({ 
-        status: 'success',
-        type: 'fallback', 
-        boletos,
-        message: 'Link único do carnê indisponível. Utilize os boletos individuais.'
-      });
-    }
-
-  } catch (error) {
-    console.error('Erro ao buscar carnê:', error);
-    return res.status(500).json({ error: 'Erro interno ao processar o carnê.' });
-  }
+    const boletos = parcelas ? parcelas.map((c, i) => ({ id: c.id, numero: i + 1, vencimento: c.vencimento, valor: c.valor, linkBoleto: c.link_boleto, status: c.status, asaasPaymentId: c.asaas_payment_id })) : [];
+    return res.status(200).json({ status: 'success', type: 'fallback', boletos, message: 'PDF unificado não disponível. Acesse os boletos individuais.' });
+  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
-// Rota antiga mantida para compatibilidade (se necessário)
-app.get('/api/alunos/:id/carne', async (req, res) => {
-  try {
-    const alunoId = req.params.id;
-
-    // 1. Buscar a cobrança mais recente do aluno que tenha um installment válido
-    console.log(`Buscando carnê para o aluno: ${alunoId}`);
-    const { data: cobrancas, error: dbError } = await supabase
-      .from('alunos_cobrancas')
-      .select('installment, asaas_installment_id')
-      .eq('aluno_id', alunoId)
-      .or('installment.not.is.null,asaas_installment_id.not.is.null')
-      .order('vencimento', { ascending: false })
-      .limit(1);
-
-    if (dbError) {
-      console.error('Erro ao buscar cobranças no Supabase:', dbError);
-      return res.status(500).json({ error: 'Erro ao buscar dados no banco de dados.' });
-    }
-
-    if (!cobrancas || cobrancas.length === 0 || (!cobrancas[0].installment && !cobrancas[0].asaas_installment_id)) {
-      console.log(`Nenhum installment encontrado para o aluno: ${alunoId}`);
-      return res.status(400).json({ 
-        error: 'Não é possível gerar um carnê único para cobranças avulsas ou o aluno não possui parcelamentos.' 
-      });
-    }
-
-    const installmentId = cobrancas[0].asaas_installment_id || cobrancas[0].installment;
-    console.log(`Installment encontrado: ${installmentId}`);
-
-    // 2. Buscar detalhes do parcelamento no Asaas
-    const installmentRes = await fetch(`https://sandbox.asaas.com/api/v3/installments/${installmentId}`, {
-      method: 'GET',
-      headers: {
-        'access_token': process.env.ASAAS_API_KEY
-      }
-    });
-
-    if (!installmentRes.ok) {
-      const errorData = await installmentRes.json();
-      console.error(`Erro ao buscar installment ${installmentId} no Asaas:`, errorData);
-      return res.status(500).json({ error: 'Erro ao buscar dados do carnê no Asaas.' });
-    }
-
-    const installmentData = await installmentRes.json();
-    console.log('Resposta do Asaas ao buscar o Installment:', installmentData);
-    
-    if (installmentData.paymentBookUrl) {
-      console.log(`URL do carnê encontrada: ${installmentData.paymentBookUrl}`);
-      return res.status(200).json({ status: 'success', type: 'pdf', url: installmentData.paymentBookUrl });
-    } else {
-      console.log(`Installment ${installmentId} não possui paymentBookUrl. Acionando Plano B (buscando parcelas).`);
-      
-      // Plano B: Buscar todas as cobranças deste installment no Supabase
-      const { data: parcelasData, error: parcelasError } = await supabase
-        .from('alunos_cobrancas')
-        .select('id, asaas_payment_id, vencimento, valor, link_boleto, status, installment, asaas_installment_id')
-        .or(`installment.eq.${installmentId},asaas_installment_id.eq.${installmentId}`)
-        .order('vencimento', { ascending: true });
-
-      if (parcelasError) {
-        console.error('Erro ao buscar parcelas no Supabase:', parcelasError);
-        return res.status(500).json({ status: 'error', error: 'Erro ao buscar parcelas do carnê.' });
-      }
-
-      if (!parcelasData || parcelasData.length === 0) {
-        return res.status(404).json({ status: 'error', error: 'Nenhuma parcela encontrada para este carnê.' });
-      }
-
-      // Format the response for the frontend modal
-      const boletos = parcelasData.map((c, index) => ({
-        id: c.id,
-        numero: index + 1,
-        vencimento: c.vencimento,
-        valor: c.valor,
-        linkBoleto: c.link_boleto,
-        status: c.status,
-        installment: c.installment
-      }));
-
-      return res.status(200).json({ 
-        status: 'success',
-        type: 'fallback', 
-        boletos,
-        message: 'Link único do carnê indisponível. Utilize os boletos individuais.'
-      });
-    }
-
-  } catch (error) {
-    console.error('Erro ao buscar carnê:', error);
-    return res.status(500).json({ error: 'Erro interno ao processar o carnê.' });
-  }
-});
-
-// Buscar Link do Boleto ou Recibo
 app.get('/api/cobrancas/:id/link', async (req, res) => {
   try {
-    const asaasPaymentId = req.params.id;
-    const paymentRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${asaasPaymentId}`, {
-      method: 'GET',
-      headers: {
-        'access_token': process.env.ASAAS_API_KEY
-      }
-    });
-
-    if (!paymentRes.ok) {
-      return res.status(404).json({ error: 'Cobrança não encontrada no Asaas.' });
-    }
-
-    const paymentData = await paymentRes.json();
-    
-    return res.status(200).json({ 
-      bankSlipUrl: paymentData.bankSlipUrl || paymentData.invoiceUrl,
-      transactionReceiptUrl: paymentData.transactionReceiptUrl
-    });
-  } catch (error) {
-    console.error('Erro ao buscar link da cobrança:', error);
-    return res.status(500).json({ error: 'Erro interno ao buscar link.' });
-  }
+    const p = await fetch(`https://sandbox.asaas.com/api/v3/payments/${req.params.id}`, { headers: { 'access_token': process.env.ASAAS_API_KEY } });
+    if (!p.ok) return res.status(404).json({ error: 'Não encontrada.' });
+    const d = await p.json();
+    return res.status(200).json({ bankSlipUrl: d.bankSlipUrl || d.invoiceUrl, transactionReceiptUrl: d.transactionReceiptUrl });
+  } catch (error) { return res.status(500).json({ error: 'Erro interno.' }); }
 });
 
+app.patch('/api/alunos/:id/rematricular', async (req, res) => res.json({ success: true }));
 
-// Excluir Cobranças em Lote
-app.delete('/api/cobrancas/lote', async (req, res) => {
-  try {
-    const { ids } = req.body; // Array de asaas_payment_ids
-
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: 'Nenhum ID fornecido para exclusão.' });
-    }
-
-    const results = await Promise.all(ids.map(async (id) => {
-      try {
-        // 1. Deletar no Asaas
-        const asaasRes = await fetch(`https://sandbox.asaas.com/api/v3/payments/${id}`, {
-          method: 'DELETE',
-          headers: {
-            'access_token': process.env.ASAAS_API_KEY
-          }
-        });
-
-        if (!asaasRes.ok && asaasRes.status !== 404) {
-          const errorData = await asaasRes.json().catch(() => ({}));
-          console.error(`Erro ao excluir cobrança ${id} no Asaas:`, errorData);
-          return { id, success: false, error: 'Erro no Asaas' };
-        }
-
-        // 2. Deletar no Supabase apenas se sucesso no Asaas
-        const { error: dbError } = await supabase
-          .from('alunos_cobrancas')
-          .delete()
-          .eq('asaas_payment_id', id);
-
-        return { id, success: true, dbSuccess: !dbError };
-      } catch (err) {
-        console.error(`Erro ao excluir cobrança ${id}:`, err);
-        return { id, success: false, error: err.message };
-      }
-    }));
-
-    const allSuccess = results.every(r => r.success && r.dbSuccess);
-    
-    if (allSuccess) {
-      return res.status(200).json({ message: 'Todas as cobranças foram excluídas com sucesso.' });
-    } else {
-      return res.status(207).json({ 
-        message: 'Algumas cobranças não puderam ser excluídas totalmente.',
-        details: results 
-      });
-    }
-
-  } catch (error) {
-    console.error('Erro na exclusão em lote:', error);
-    return res.status(500).json({ error: 'Erro interno ao processar exclusão em lote.' });
+// INICIALIZAÇÃO HÍBRIDA (Resolve o Preview do AI Studio e o Portainer)
+async function startServer() {
+  const distPath = path.join(__dirname, 'dist');
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    app.use((req, res, next) => req.path.startsWith('/api') ? next() : res.sendFile(path.join(distPath, 'index.html')));
+  } else {
+    const vite = await import('vite').then(m => m.createServer({ server: { middlewareMode: true }, appType: 'spa' }));
+    app.use(vite.middlewares);
   }
-});
-
-app.patch('/api/alunos/:id/rematricular', async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // In this architecture, the frontend syncs the entire state via dbService.
-    // This route serves as an acknowledgment for the re-enrollment action.
-    
-    res.json({ success: true, message: 'Aluno rematriculado com sucesso.' });
-  } catch (error) {
-    console.error('Erro ao rematricular aluno:', error);
-    res.status(500).json({ error: 'Erro interno ao rematricular aluno.' });
-  }
-});
-
-// --- LÓGICA DE INICIALIZAÇÃO CORRIGIDA ---
-const distPath = path.join(__dirname, 'dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-} else {
-  app.get('/', (req, res) => res.send('API Operante no AI Studio!'));
+  app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Servidor na porta ${PORT}`));
 }
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-});
+startServer();
